@@ -217,6 +217,8 @@ jobs:
               }
               return Object.values(groups);
             }
+            // Normalize dynamic branch path segments into a safe slug and
+            // guarantee a non-empty value for branch/file naming.
             function normalizeBranchSegment(value) {
               return value
                 .toLowerCase()
@@ -356,7 +358,7 @@ jobs:
                   });
                   const branchSafeSource = normalizeBranchSegment(source);
                   const branch = `security-rollup/${severity}/${branchSafeSource}`;
-                  let branchCreated = false;
+                  let isNewBranch = false;
                   try {
                     await github.rest.git.createRef({
                       owner,
@@ -364,7 +366,7 @@ jobs:
                       ref: `refs/heads/${branch}`,
                       sha: baseRef.data.object.sha,
                     });
-                    branchCreated = true;
+                    isNewBranch = true;
                   } catch (err) {
                     if (err.status !== 422) {
                       core.error(`Failed to create branch ${branch}: ${err.message}`);
@@ -388,8 +390,8 @@ jobs:
                     '- [ ] Close associated rollup issue(s)',
                   ].join('\n');
 
-                  let shouldWriteRollup = true;
-                  if (!branchCreated) {
+                  let shouldCreateNewRollupFile = true;
+                  if (!isNewBranch) {
                     try {
                       await github.rest.repos.getContent({
                         owner,
@@ -397,14 +399,14 @@ jobs:
                         path: rollupPath,
                         ref: branch,
                       });
-                      shouldWriteRollup = false;
+                      shouldCreateNewRollupFile = false;
                       core.info(`Keeping existing rollup file ${rollupPath} on branch ${branch}.`);
                     } catch (err) {
                       if (err.status !== 404) throw err;
                     }
                   }
 
-                  if (shouldWriteRollup) {
+                  if (shouldCreateNewRollupFile) {
                     await github.rest.repos.createOrUpdateFileContents({
                       owner,
                       repo,
