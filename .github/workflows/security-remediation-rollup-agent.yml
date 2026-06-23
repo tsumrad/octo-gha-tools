@@ -232,7 +232,7 @@ jobs:
               per_page: 100
             });
 
-            const existing = openIssues.find((issue) => issue.title === title && issue.pull_request === undefined);
+            const existing = openIssues.find((issue) => issue.title === title && !issue.pull_request);
             if (existing) {
               await github.rest.issues.update({
                 owner,
