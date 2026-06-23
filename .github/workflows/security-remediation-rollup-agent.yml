@@ -347,16 +347,25 @@ jobs:
                     repo,
                     ref: `heads/${defaultBranch}`,
                   });
-                  const branchSafeSource = source.replace(/[^a-z0-9-]/gi, '-').toLowerCase();
-                  const branch = `security-rollup/${severity}/${branchSafeSource}-${Date.now()}`;
-                  await github.rest.git.createRef({
-                    owner,
-                    repo,
-                    ref: `refs/heads/${branch}`,
-                    sha: baseRef.data.object.sha,
-                  });
+                  const branchSafeSource = source
+                    .toLowerCase()
+                    .replace(/[^a-z0-9-]+/g, '-')
+                    .replace(/-+/g, '-')
+                    .replace(/^-|-$/g, '') || 'source';
+                  const branch = `security-rollup/${severity}/${branchSafeSource}`;
+                  try {
+                    await github.rest.git.createRef({
+                      owner,
+                      repo,
+                      ref: `refs/heads/${branch}`,
+                      sha: baseRef.data.object.sha,
+                    });
+                  } catch (err) {
+                    if (err.status !== 422) throw err;
+                    core.info(`Using existing branch ${branch} for ${severity} ${source}.`);
+                  }
 
-                  const rollupPath = `.github/security-rollups/${source}-${severity}.md`;
+                  const rollupPath = `.github/security-rollups/${severity}-${branchSafeSource}.md`;
                   const rollupContent = [
                     `# Security Fix Rollup: ${severity} ${source}`,
                     '',
@@ -380,6 +389,15 @@ jobs:
                     branch,
                   });
 
+                  const prBody = [
+                    '## Security Fix Rollup',
+                    '',
+                    `This PR tracks remediation for **${alerts.length}** open **${severity}** ${source} finding(s).`,
+                  ];
+                  if (issueNumber) {
+                    prBody.push('', `Related issue: #${issueNumber}`);
+                  }
+
                   const createdPr = await github.rest.pulls.create({
                     owner,
                     repo,
@@ -387,13 +405,7 @@ jobs:
                     head: branch,
                     base: defaultBranch,
                     draft: true,
-                    body: [
-                      `## Security Fix Rollup`,
-                      '',
-                      `This PR tracks remediation for **${alerts.length}** open **${severity}** ${source} finding(s).`,
-                      '',
-                      issueNumber ? `Related issue: #${issueNumber}` : '',
-                    ].filter(Boolean).join('\n'),
+                    body: prBody.join('\n'),
                   });
                   prNumber = createdPr.data.number;
                   prAction = 'created';
