@@ -1,0 +1,374 @@
+name: Security Remediation Rollup Agent
+
+on:
+  # Reusable entrypoint for repository workflows. Callers configure which alert
+  # sources to process and whether the agent should create remediation artifacts.
+  # This workflow owns alert collection, deduplication, issue creation, and the
+  # run summary; the caller repository owns runners, tokens, and all artifacts.
+  workflow_call:
+    inputs:
+      enable_dependabot: &enable_dependabot_input
+        description: Process open Dependabot vulnerability alerts
+        required: false
+        default: true
+        type: boolean
+      enable_code_scanning: &enable_code_scanning_input
+        description: Process open Code Scanning alerts
+        required: false
+        default: true
+        type: boolean
+      create_missing_fixes: &create_missing_fixes_input
+        description: >
+          Create a tracking issue for each severity group that has no existing
+          open rollup issue. When false the workflow reports findings but makes
+          no changes to the caller repository.
+        required: false
+        default: true
+        type: boolean
+      dry_run: &dry_run_input
+        description: >
+          Log all planned actions without creating branches, pull requests, or
+          issues. Overrides create_missing_fixes.
+        required: false
+        default: false
+        type: boolean
+      min_severity: &min_severity_input
+        description: >
+          Minimum severity level to process. Accepted values in descending
+          order: critical, high, medium, low. Findings below this threshold
+          are collected in the summary but not actioned.
+        required: false
+        default: medium
+        type: string
+      runner: &runner_input
+        description: >
+          Runner label for this job. Callers can supply a self-hosted label to
+          run on organization-specific infrastructure.
+        required: false
+        default: ubuntu-latest
+        type: string
+
+  # Optional manual trigger so this workflow can be tested without a separate
+  # caller workflow.
+  workflow_dispatch:
+    inputs:
+      enable_dependabot: *enable_dependabot_input
+      enable_code_scanning: *enable_code_scanning_input
+      create_missing_fixes: *create_missing_fixes_input
+      dry_run: *dry_run_input
+      min_severity: *min_severity_input
+      runner: *runner_input
+
+permissions:
+  # Read security findings from the caller repository.
+  security-events: read
+  # Push remediation branches and commits.
+  contents: write
+  # Open rollup pull requests.
+  pull-requests: write
+  # Create tracking issues.
+  issues: write
+
+jobs:
+  security-rollup:
+    name: Security Remediation Rollup
+    # Respect the caller's runner selection; fall back to ubuntu-latest.
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Always check out the caller repository so git operations stay
+          # inside the correct scope (see spec section 13.5).
+          repository: ${{ github.repository }}
+          token: ${{ github.token }}
+          fetch-depth: 0
+
+      # -----------------------------------------------------------------------
+      # Collect alerts from enabled sources and write JSON outputs consumed by
+      # the process-findings step.
+      # -----------------------------------------------------------------------
+      - name: Collect security alerts
+        id: collect
+        uses: actions/github-script@v7
+        env:
+          ENABLE_DEPENDABOT: ${{ inputs.enable_dependabot }}
+          ENABLE_CODE_SCANNING: ${{ inputs.enable_code_scanning }}
+          MIN_SEVERITY: ${{ inputs.min_severity }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const severityRank = { critical: 4, high: 3, medium: 2, low: 1 };
+            const minSeverity = process.env.MIN_SEVERITY || 'medium';
+            const minRank = severityRank[minSeverity] ?? 2;
+
+            // Paginate through all open alerts for a given list endpoint.
+            async function paginate(method, params) {
+              return github.paginate(method, { ...params, per_page: 100 });
+            }
+
+            let dependabotAlerts = [];
+            let codeScanningAlerts = [];
+
+            // --- Dependabot ---------------------------------------------------
+            if (process.env.ENABLE_DEPENDABOT === 'true') {
+              core.info('Collecting Dependabot alerts…');
+              try {
+                const raw = await paginate(
+                  github.rest.dependabot.listAlertsForRepo,
+                  { owner, repo, state: 'open' }
+                );
+                dependabotAlerts = raw
+                  .filter(a => {
+                    const sev = a.security_vulnerability?.severity?.toLowerCase() ?? 'low';
+                    return (severityRank[sev] ?? 1) >= minRank;
+                  })
+                  .map(a => ({
+                    id: a.number,
+                    severity: a.security_vulnerability?.severity?.toLowerCase() ?? 'low',
+                    package: a.security_vulnerability?.package?.name ?? 'unknown',
+                    ecosystem: a.security_vulnerability?.package?.ecosystem ?? 'unknown',
+                    cve: a.security_advisory?.cve_id ?? a.security_advisory?.ghsa_id ?? '',
+                    summary: a.security_advisory?.summary ?? '',
+                    auto_dismissed: a.auto_dismissed_at !== null,
+                    html_url: a.html_url,
+                  }));
+                core.info(`Found ${dependabotAlerts.length} Dependabot alert(s) at or above ${minSeverity}.`);
+              } catch (err) {
+                if (err.status === 403 || err.status === 404) {
+                  core.warning(`Dependabot alerts unavailable (${err.status}). Skipping.`);
+                } else {
+                  throw err;
+                }
+              }
+            }
+
+            // --- Code Scanning ------------------------------------------------
+            if (process.env.ENABLE_CODE_SCANNING === 'true') {
+              core.info('Collecting Code Scanning alerts…');
+              try {
+                const raw = await paginate(
+                  github.rest.codeScanning.listAlertsForRepo,
+                  { owner, repo, state: 'open' }
+                );
+                codeScanningAlerts = raw
+                  .filter(a => {
+                    const sev = (
+                      a.rule?.severity ?? a.rule?.security_severity_level ?? 'low'
+                    ).toLowerCase();
+                    return (severityRank[sev] ?? 1) >= minRank;
+                  })
+                  .map(a => ({
+                    id: a.number,
+                    severity: (
+                      a.rule?.severity ?? a.rule?.security_severity_level ?? 'low'
+                    ).toLowerCase(),
+                    rule_id: a.rule?.id ?? '',
+                    rule_name: a.rule?.name ?? a.rule?.id ?? 'unknown',
+                    tool: a.tool?.name ?? 'unknown',
+                    location: a.most_recent_instance?.location?.path ?? '',
+                    html_url: a.html_url,
+                  }));
+                core.info(`Found ${codeScanningAlerts.length} Code Scanning alert(s) at or above ${minSeverity}.`);
+              } catch (err) {
+                if (err.status === 403 || err.status === 404) {
+                  core.warning(`Code Scanning alerts unavailable (${err.status}). Skipping.`);
+                } else {
+                  throw err;
+                }
+              }
+            }
+
+            core.setOutput('dependabot_alerts', JSON.stringify(dependabotAlerts));
+            core.setOutput('code_scanning_alerts', JSON.stringify(codeScanningAlerts));
+            core.setOutput('total_count', String(dependabotAlerts.length + codeScanningAlerts.length));
+
+      # -----------------------------------------------------------------------
+      # For each severity group that has open findings, locate an existing open
+      # rollup issue. When create_missing_fixes is enabled (and not dry_run)
+      # create one for any group that has no tracker yet.
+      # -----------------------------------------------------------------------
+      - name: Process findings and create tracking issues
+        id: process
+        uses: actions/github-script@v7
+        env:
+          DEPENDABOT_ALERTS: ${{ steps.collect.outputs.dependabot_alerts }}
+          CODE_SCANNING_ALERTS: ${{ steps.collect.outputs.code_scanning_alerts }}
+          CREATE_MISSING_FIXES: ${{ inputs.create_missing_fixes }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const dryRun = process.env.DRY_RUN === 'true';
+            const createMissing = process.env.CREATE_MISSING_FIXES === 'true';
+
+            const dependabotAlerts = JSON.parse(process.env.DEPENDABOT_ALERTS || '[]');
+            const codeScanningAlerts = JSON.parse(process.env.CODE_SCANNING_ALERTS || '[]');
+
+            // Group alerts by [source, severity] so each group gets one issue.
+            function groupBySeverity(alerts, source) {
+              const groups = {};
+              for (const alert of alerts) {
+                const key = `${source}:${alert.severity}`;
+                if (!groups[key]) groups[key] = { source, severity: alert.severity, alerts: [] };
+                groups[key].alerts.push(alert);
+              }
+              return Object.values(groups);
+            }
+
+            const groups = [
+              ...groupBySeverity(dependabotAlerts, 'dependabot'),
+              ...groupBySeverity(codeScanningAlerts, 'code-scanning'),
+            ];
+
+            // Sort by severity descending so critical groups are processed first.
+            const sevOrder = { critical: 4, high: 3, medium: 2, low: 1 };
+            groups.sort((a, b) => (sevOrder[b.severity] ?? 0) - (sevOrder[a.severity] ?? 0));
+
+            // Fetch all open issues once to avoid N+1 queries.
+            const openIssues = await github.paginate(
+              github.rest.issues.listForRepo,
+              { owner, repo, state: 'open', labels: 'security-rollup', per_page: 100 }
+            );
+
+            const results = [];
+
+            for (const group of groups) {
+              const { source, severity, alerts } = group;
+              // Rollup issue title convention: "[Security Rollup] <severity> <source>"
+              const titlePrefix = `[Security Rollup] ${severity} ${source}`;
+              const existing = openIssues.find(i => i.title.startsWith(titlePrefix));
+
+              if (existing) {
+                core.info(`Existing rollup issue found for ${severity} ${source}: #${existing.number}`);
+                results.push({ source, severity, count: alerts.length, issue: existing.number, action: 'existing' });
+                continue;
+              }
+
+              if (!createMissing) {
+                core.info(`No rollup issue for ${severity} ${source} (create_missing_fixes=false).`);
+                results.push({ source, severity, count: alerts.length, issue: null, action: 'skipped' });
+                continue;
+              }
+
+              // Build issue body listing each alert.
+              const rows = alerts.map(a => {
+                if (source === 'dependabot') {
+                  return `| #${a.id} | \`${a.package}\` (${a.ecosystem}) | ${a.cve || '—'} | [View](${a.html_url}) |`;
+                } else {
+                  return `| #${a.id} | ${a.rule_name} | ${a.tool} | \`${a.location}\` | [View](${a.html_url}) |`;
+                }
+              });
+
+              let body;
+              if (source === 'dependabot') {
+                body = [
+                  `## ${severity.charAt(0).toUpperCase() + severity.slice(1)} Dependabot Alerts`,
+                  '',
+                  `This issue tracks **${alerts.length}** open Dependabot vulnerability alert(s) ` +
+                  `with **${severity}** severity in \`${owner}/${repo}\`.`,
+                  '',
+                  '| Alert | Package | CVE / Advisory | Details |',
+                  '| ----- | ------- | -------------- | ------- |',
+                  ...rows,
+                  '',
+                  `_Generated by the [Security Remediation Rollup Agent](${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId})._`,
+                ].join('\n');
+              } else {
+                body = [
+                  `## ${severity.charAt(0).toUpperCase() + severity.slice(1)} Code Scanning Alerts`,
+                  '',
+                  `This issue tracks **${alerts.length}** open Code Scanning alert(s) ` +
+                  `with **${severity}** severity in \`${owner}/${repo}\`.`,
+                  '',
+                  '| Alert | Rule | Tool | Location | Details |',
+                  '| ----- | ---- | ---- | -------- | ------- |',
+                  ...rows,
+                  '',
+                  `_Generated by the [Security Remediation Rollup Agent](${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId})._`,
+                ].join('\n');
+              }
+
+              const title = `${titlePrefix} (${alerts.length} open)`;
+              const labels = ['security-rollup', severity, source === 'dependabot' ? 'dependencies' : 'code-scanning'];
+
+              if (dryRun) {
+                core.info(`[dry-run] Would create issue: "${title}"`);
+                results.push({ source, severity, count: alerts.length, issue: null, action: 'dry-run' });
+              } else {
+                // Ensure labels exist before assigning them.
+                const labelDefs = [
+                  { name: 'security-rollup', color: 'e11d48', description: 'Security remediation rollup tracking' },
+                  { name: 'critical',        color: '7f1d1d', description: 'Critical severity security finding' },
+                  { name: 'high',            color: 'b91c1c', description: 'High severity security finding' },
+                  { name: 'medium',          color: 'f97316', description: 'Medium severity security finding' },
+                  { name: 'low',             color: 'facc15', description: 'Low severity security finding' },
+                  { name: 'dependencies',    color: '0075ca', description: 'Dependency update or vulnerability' },
+                  { name: 'code-scanning',   color: '5b21b6', description: 'Code scanning finding' },
+                ];
+                for (const def of labelDefs.filter(d => labels.includes(d.name))) {
+                  try {
+                    await github.rest.issues.createLabel({ owner, repo, ...def });
+                  } catch (err) {
+                    // 422 = label already exists; any other error is unexpected.
+                    if (err.status !== 422) throw err;
+                  }
+                }
+
+                const created = await github.rest.issues.create({
+                  owner, repo, title, body, labels,
+                });
+                core.info(`Created rollup issue #${created.data.number} for ${severity} ${source}.`);
+                results.push({ source, severity, count: alerts.length, issue: created.data.number, action: 'created' });
+              }
+            }
+
+            core.setOutput('results', JSON.stringify(results));
+
+      # -----------------------------------------------------------------------
+      # Write a Markdown summary so operators can see what was found and acted
+      # upon without digging into individual step logs.
+      # -----------------------------------------------------------------------
+      - name: Write job summary
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          TOTAL_COUNT: ${{ steps.collect.outputs.total_count }}
+          DEPENDABOT_ALERTS: ${{ steps.collect.outputs.dependabot_alerts }}
+          CODE_SCANNING_ALERTS: ${{ steps.collect.outputs.code_scanning_alerts }}
+          PROCESS_RESULTS: ${{ steps.process.outputs.results }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          MIN_SEVERITY: ${{ inputs.min_severity }}
+        with:
+          script: |
+            const dryRun = process.env.DRY_RUN === 'true';
+            const minSeverity = process.env.MIN_SEVERITY || 'medium';
+            const total = parseInt(process.env.TOTAL_COUNT || '0', 10);
+            const dependabotAlerts = JSON.parse(process.env.DEPENDABOT_ALERTS || '[]');
+            const codeScanningAlerts = JSON.parse(process.env.CODE_SCANNING_ALERTS || '[]');
+            const results = JSON.parse(process.env.PROCESS_RESULTS || '[]');
+
+            const lines = [];
+            lines.push('## Security Remediation Rollup Summary');
+            if (dryRun) lines.push('> **dry-run mode** — no issues or branches were created.');
+            lines.push('');
+            lines.push(`**Minimum severity processed:** \`${minSeverity}\``);
+            lines.push(`**Total actionable findings:** ${total}`);
+            lines.push(`  - Dependabot: ${dependabotAlerts.length}`);
+            lines.push(`  - Code Scanning: ${codeScanningAlerts.length}`);
+            lines.push('');
+
+            if (results.length > 0) {
+              lines.push('### Rollup Actions');
+              lines.push('| Source | Severity | Findings | Action | Issue |');
+              lines.push('| ------ | -------- | -------- | ------ | ----- |');
+              for (const r of results) {
+                const issueCell = r.issue ? `#${r.issue}` : '—';
+                lines.push(`| ${r.source} | ${r.severity} | ${r.count} | ${r.action} | ${issueCell} |`);
+              }
+            } else if (total === 0) {
+              lines.push('✅ No actionable findings above the minimum severity threshold.');
+            }
+
+            await core.summary.addRaw(lines.join('\n')).write();
