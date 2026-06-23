@@ -108,7 +108,6 @@ jobs:
               : [];
 
             const dependabotSeverities = ['critical', 'high', 'medium', 'low'];
-            const severityRank = dependabotSeverities;
             const allSeverities = [];
             const normalizeSeverity = (kind, value) => {
               if (!value) return null;
@@ -134,7 +133,7 @@ jobs:
             }
 
             let highestSeverity = 'none';
-            for (const level of severityRank) {
+            for (const level of dependabotSeverities) {
               if (allSeverities.includes(level)) {
                 highestSeverity = level;
                 break;
@@ -157,7 +156,7 @@ jobs:
                   dependency: alert.dependency?.package?.name ?? 'unknown',
                   ecosystem: alert.dependency?.package?.ecosystem ?? 'unknown',
                   severity: alert.security_vulnerability?.severity ?? 'unknown',
-                  summary: alert.security_advisory?.summary ?? 'No summary',
+                  summary: alert.security_advisory?.summary ?? 'unknown',
                   html_url: alert.html_url
                 })),
                 code_scanning: codeScanning.slice(0, 20).map((alert) => ({
