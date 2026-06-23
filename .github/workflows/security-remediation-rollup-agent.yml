@@ -62,10 +62,8 @@ on:
 permissions:
   # Read security findings from the caller repository.
   security-events: read
-  # Push remediation branches and commits.
-  contents: write
-  # Open rollup pull requests.
-  pull-requests: write
+  # Required for checkout.
+  contents: read
   # Create tracking issues.
   issues: write
 
@@ -79,8 +77,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # Always check out the caller repository so git operations stay
-          # inside the correct scope (see spec section 13.5).
+          # Always check out the caller repository so operations stay inside the
+          # correct scope (see spec section 13.4 — Repository Context).
           repository: ${{ github.repository }}
           token: ${{ github.token }}
           fetch-depth: 0
