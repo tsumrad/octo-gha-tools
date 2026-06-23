@@ -107,18 +107,29 @@ jobs:
                 })
               : [];
 
-            const severityRank = ['critical', 'high', 'error', 'medium', 'low', 'warning', 'note'];
+            const severityRank = ['critical', 'high', 'medium', 'low'];
             const allSeverities = [];
+            const normalizeSeverity = (kind, value) => {
+              if (!value) return null;
+              if (kind === 'dependabot') {
+                return ['critical', 'high', 'medium', 'low'].includes(value) ? value : null;
+              }
+              if (kind === 'code_scanning') {
+                if (value === 'error') return 'high';
+                if (value === 'warning') return 'medium';
+                if (value === 'note') return 'low';
+                return null;
+              }
+              return null;
+            };
 
             for (const alert of dependabot) {
-              if (alert.security_vulnerability?.severity) {
-                allSeverities.push(alert.security_vulnerability.severity);
-              }
+              const normalized = normalizeSeverity('dependabot', alert.security_vulnerability?.severity);
+              if (normalized) allSeverities.push(normalized);
             }
             for (const alert of codeScanning) {
-              if (alert.rule?.severity) {
-                allSeverities.push(alert.rule.severity);
-              }
+              const normalized = normalizeSeverity('code_scanning', alert.rule?.severity);
+              if (normalized) allSeverities.push(normalized);
             }
 
             let highestSeverity = 'none';
