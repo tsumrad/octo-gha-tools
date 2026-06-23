@@ -14,7 +14,7 @@ on:
         default: true
         type: boolean
       create_missing_fixes:
-        description: Reserved for future remediation PR automation.
+        description: Include remediation intent metadata in rollup output.
         required: false
         default: true
         type: boolean
@@ -41,7 +41,7 @@ on:
         default: true
         type: boolean
       create_missing_fixes:
-        description: Reserved for future remediation PR automation.
+        description: Include remediation intent metadata in rollup output.
         required: false
         default: true
         type: boolean
@@ -107,12 +107,13 @@ jobs:
                 })
               : [];
 
-            const severityRank = ['critical', 'high', 'medium', 'low'];
+            const dependabotSeverities = ['critical', 'high', 'medium', 'low'];
+            const severityRank = dependabotSeverities;
             const allSeverities = [];
             const normalizeSeverity = (kind, value) => {
               if (!value) return null;
               if (kind === 'dependabot') {
-                return ['critical', 'high', 'medium', 'low'].includes(value) ? value : null;
+                return dependabotSeverities.includes(value) ? value : null;
               }
               if (kind === 'code_scanning') {
                 if (value === 'error') return 'high';
