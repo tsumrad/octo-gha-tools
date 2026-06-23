@@ -1,0 +1,246 @@
+name: Security Remediation Rollup Agent
+
+on:
+  workflow_call:
+    inputs:
+      enable_dependabot:
+        description: Include Dependabot alerts in the rollup.
+        required: false
+        default: true
+        type: boolean
+      enable_code_scanning:
+        description: Include code scanning alerts in the rollup.
+        required: false
+        default: true
+        type: boolean
+      create_missing_fixes:
+        description: Reserved for future remediation PR automation.
+        required: false
+        default: true
+        type: boolean
+      dry_run:
+        description: When true, compute rollup only and skip issue creation.
+        required: false
+        default: false
+        type: boolean
+      runner:
+        description: Runner label used by the workflow.
+        required: false
+        default: ubuntu-latest
+        type: string
+  workflow_dispatch:
+    inputs:
+      enable_dependabot:
+        description: Include Dependabot alerts in the rollup.
+        required: false
+        default: true
+        type: boolean
+      enable_code_scanning:
+        description: Include code scanning alerts in the rollup.
+        required: false
+        default: true
+        type: boolean
+      create_missing_fixes:
+        description: Reserved for future remediation PR automation.
+        required: false
+        default: true
+        type: boolean
+      dry_run:
+        description: When true, compute rollup only and skip issue creation.
+        required: false
+        default: false
+        type: boolean
+      runner:
+        description: Runner label used by the workflow.
+        required: false
+        default: ubuntu-latest
+        type: string
+
+permissions:
+  contents: read
+  security-events: read
+  issues: write
+
+jobs:
+  rollup:
+    name: Aggregate security findings
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    outputs:
+      dependabot_count: ${{ steps.collect.outputs.dependabot_count }}
+      code_scanning_count: ${{ steps.collect.outputs.code_scanning_count }}
+      total_count: ${{ steps.collect.outputs.total_count }}
+      highest_severity: ${{ steps.collect.outputs.highest_severity }}
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          token: ${{ github.token }}
+
+      - name: Collect open security alerts
+        id: collect
+        uses: actions/github-script@v7
+        env:
+          ENABLE_DEPENDABOT: ${{ inputs.enable_dependabot }}
+          ENABLE_CODE_SCANNING: ${{ inputs.enable_code_scanning }}
+          CREATE_MISSING_FIXES: ${{ inputs.create_missing_fixes }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const enabledDependabot = process.env.ENABLE_DEPENDABOT === 'true';
+            const enabledCodeScanning = process.env.ENABLE_CODE_SCANNING === 'true';
+            const createMissingFixes = process.env.CREATE_MISSING_FIXES === 'true';
+
+            const dependabot = enabledDependabot
+              ? await github.paginate(github.rest.dependabot.listAlertsForRepo, {
+                  owner,
+                  repo,
+                  state: 'open',
+                  per_page: 100
+                })
+              : [];
+
+            const codeScanning = enabledCodeScanning
+              ? await github.paginate(github.rest.codeScanning.listAlertsForRepo, {
+                  owner,
+                  repo,
+                  state: 'open',
+                  per_page: 100
+                })
+              : [];
+
+            const severityRank = ['critical', 'high', 'medium', 'low', 'warning', 'note'];
+            const allSeverities = [];
+
+            for (const alert of dependabot) {
+              if (alert.security_vulnerability?.severity) {
+                allSeverities.push(alert.security_vulnerability.severity);
+              }
+            }
+            for (const alert of codeScanning) {
+              if (alert.rule?.severity) {
+                allSeverities.push(alert.rule.severity);
+              }
+            }
+
+            let highestSeverity = 'none';
+            for (const level of severityRank) {
+              if (allSeverities.includes(level)) {
+                highestSeverity = level;
+                break;
+              }
+            }
+
+            const rollup = {
+              repository: `${owner}/${repo}`,
+              generated_at: new Date().toISOString(),
+              create_missing_fixes: createMissingFixes,
+              counts: {
+                dependabot: dependabot.length,
+                code_scanning: codeScanning.length,
+                total: dependabot.length + codeScanning.length
+              },
+              highest_severity: highestSeverity,
+              samples: {
+                dependabot: dependabot.slice(0, 20).map((alert) => ({
+                  number: alert.number,
+                  dependency: alert.dependency?.package?.name ?? 'unknown',
+                  ecosystem: alert.dependency?.package?.ecosystem ?? 'unknown',
+                  severity: alert.security_vulnerability?.severity ?? 'unknown',
+                  summary: alert.security_advisory?.summary ?? 'No summary',
+                  html_url: alert.html_url
+                })),
+                code_scanning: codeScanning.slice(0, 20).map((alert) => ({
+                  number: alert.number,
+                  severity: alert.rule?.severity ?? 'unknown',
+                  rule_id: alert.rule?.id ?? 'unknown',
+                  rule_name: alert.rule?.name ?? 'unknown',
+                  html_url: alert.html_url
+                }))
+              }
+            };
+
+            fs.writeFileSync('security-remediation-rollup.json', JSON.stringify(rollup, null, 2));
+            core.setOutput('dependabot_count', String(rollup.counts.dependabot));
+            core.setOutput('code_scanning_count', String(rollup.counts.code_scanning));
+            core.setOutput('total_count', String(rollup.counts.total));
+            core.setOutput('highest_severity', rollup.highest_severity);
+
+      - name: Summarize findings
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "### Security Remediation Rollup"
+            echo ""
+            echo "- Dependabot alerts: ${{ steps.collect.outputs.dependabot_count }}"
+            echo "- Code scanning alerts: ${{ steps.collect.outputs.code_scanning_count }}"
+            echo "- Total alerts: ${{ steps.collect.outputs.total_count }}"
+            echo "- Highest severity: ${{ steps.collect.outputs.highest_severity }}"
+            echo "- create_missing_fixes: ${{ inputs.create_missing_fixes }}"
+            echo "- dry_run: ${{ inputs.dry_run }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload rollup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-remediation-rollup-${{ github.run_id }}
+          path: security-remediation-rollup.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create or update remediation issue
+        if: inputs.dry_run != true && steps.collect.outputs.total_count != '0'
+        uses: actions/github-script@v7
+        env:
+          DEPENDABOT_COUNT: ${{ steps.collect.outputs.dependabot_count }}
+          CODE_SCANNING_COUNT: ${{ steps.collect.outputs.code_scanning_count }}
+          TOTAL_COUNT: ${{ steps.collect.outputs.total_count }}
+          HIGHEST_SEVERITY: ${{ steps.collect.outputs.highest_severity }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const title = 'Security remediation rollup';
+            const body = [
+              '## Security Remediation Rollup',
+              '',
+              `- Dependabot alerts: ${process.env.DEPENDABOT_COUNT}`,
+              `- Code scanning alerts: ${process.env.CODE_SCANNING_COUNT}`,
+              `- Total alerts: ${process.env.TOTAL_COUNT}`,
+              `- Highest severity: ${process.env.HIGHEST_SEVERITY}`,
+              '',
+              `Workflow run: ${process.env.RUN_URL}`,
+              '',
+              '_This issue is maintained by the security-remediation-rollup-agent workflow._'
+            ].join('\n');
+
+            const openIssues = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              labels: 'security-remediation',
+              per_page: 100
+            });
+
+            const existing = openIssues.find((issue) => issue.title === title);
+            if (existing) {
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body
+              });
+              core.info(`Updated issue #${existing.number}`);
+              return;
+            }
+
+            const created = await github.rest.issues.create({
+              owner,
+              repo,
+              title,
+              body,
+              labels: ['security-remediation']
+            });
+            core.info(`Created issue #${created.data.number}`);
