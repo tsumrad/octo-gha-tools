@@ -6,7 +6,7 @@ set -euo pipefail
 # Modes:
 #   audit - emits matrix entries like {"ecosystem":"node"}
 #   sbom  - emits filesystem matrix entries for unique detected ecosystem directories, like
-#           {"scan_kind":"filesystem","scan_label":"filesystem-node-src-app","source":"dir:src/app","output_prefix":"filesystem-node-src-app"}
+#           {"scan_kind":"filesystem","scan_label":"filesystem-node-src-app","source":"dir:src/app","output_prefix":"sbom/filesystem-node-src-app"}
 #
 # Output JSON shape:
 # {
@@ -82,7 +82,7 @@ sbom)
               scan_kind: "filesystem",
               scan_label: .label,
               source: ("dir:" + .path),
-              output_prefix: .label,
+              output_prefix: ("sbom/" + .label),
               ecosystems: .ecosystems
             }]
       else
@@ -91,7 +91,7 @@ sbom)
           scan_kind: "filesystem",
           scan_label: "filesystem-generic",
           source: ("dir:" + $sourcePath),
-          output_prefix: "filesystem-generic",
+          output_prefix: "sbom/filesystem-generic",
           ecosystems: []
         }]
       end

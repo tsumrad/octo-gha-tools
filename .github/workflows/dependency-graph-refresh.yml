@@ -1,4 +1,4 @@
-name: Refresh Dependency Graph 
+name: Dependency Graph Refresh
 
 on:
   # Reusable entrypoint for repository workflows. Callers provide the scan path
@@ -13,12 +13,11 @@ on:
         required: false
         default: .
         type: string
-      enable_filesystem_scan: &enable_filesystem_scan_input
-        description: Generate CycloneDX SBOMs from detected ecosystem directories
+      graph_refresh_args: &graph_refresh_args_input
+        description: Additional detector arguments for dependency graph refresh
         required: false
-        default: true
-        type: boolean
-
+        default: ''
+        type: string
       # Tooling. Pin Syft so generated SBOM content is deterministic across
       # workflow runs and across repositories that call this reusable workflow.
       syft_version: &syft_version_input
@@ -50,7 +49,7 @@ on:
   workflow_dispatch:
     inputs:
       source_path: *source_path_input
-      enable_filesystem_scan: *enable_filesystem_scan_input
+      graph_refresh_args: *graph_refresh_args_input
       syft_version: *syft_version_input
       upload_artifacts: *upload_artifacts_input
       artifact_prefix: *artifact_prefix_input
@@ -70,6 +69,7 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       matrix_count: ${{ steps.matrix.outputs.matrix_count }}
+      graph_refresh_args: ${{ steps.cfg.outputs.graph_refresh_args }}
       syft_version: ${{ steps.cfg.outputs.syft_version }}
       upload_artifacts: ${{ steps.cfg.outputs.upload_artifacts }}
       artifact_prefix: ${{ steps.cfg.outputs.artifact_prefix }}
@@ -91,28 +91,15 @@ jobs:
           # Copy inputs into job outputs so matrix children read one normalized
           # value set instead of re-evaluating workflow inputs in every job.
           echo "source_path=${{ inputs.source_path }}" >> "$GITHUB_OUTPUT"
-          echo "enable_filesystem_scan=${{ inputs.enable_filesystem_scan }}" >> "$GITHUB_OUTPUT"
+          echo "graph_refresh_args=${{ inputs.graph_refresh_args }}" >> "$GITHUB_OUTPUT"
           echo "syft_version=${{ inputs.syft_version }}" >> "$GITHUB_OUTPUT"
           echo "upload_artifacts=${{ inputs.upload_artifacts }}" >> "$GITHUB_OUTPUT"
           echo "artifact_prefix=${{ inputs.artifact_prefix }}" >> "$GITHUB_OUTPUT"
           echo "artifact_retention_days=${{ inputs.artifact_retention_days }}" >> "$GITHUB_OUTPUT"
 
-      - name: Validate inputs only
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          # This workflow currently supports filesystem SBOM generation only.
-          # Keep the input explicit so future scan modes can be added without
-          # changing the public workflow contract.
-          if [ "${{ steps.cfg.outputs.enable_filesystem_scan }}" != "true" ]; then
-            echo "enable_filesystem_scan must be true." >&2
-            exit 1
-          fi
-
       - name: Build scan matrix
         id: matrix
-        uses: sumathi-thirumani/shared-gha-tools/.github/actions/build-ecosystem-matrix@feature/dependency-graph-refresh
+        uses: tsumrad/shared-gha-tools/.github/actions/build-ecosystem-matrix@sbom-generation
         with:
           # Detect ecosystem manifests, skip generated/vendor folders, and emit
           # one matrix entry for each filesystem SBOM target.
@@ -124,6 +111,7 @@ jobs:
         env:
           DETECTED: ${{ steps.matrix.outputs.detected }}
           TARGETS: ${{ steps.matrix.outputs.targets }}
+          MATRIX: ${{ steps.matrix.outputs.matrix }}
         run: |
           set -euo pipefail
           # Add a human-readable summary next to the machine-readable matrix
@@ -134,6 +122,11 @@ jobs:
           targets_summary="$(jq -r 'join(", ")' <<< "$TARGETS")"
           echo "Detected ecosystems: $detected_summary" >> "$GITHUB_STEP_SUMMARY"
           echo "Selected targets: $targets_summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "Matrix entries:"
+          jq -c '.include[]' <<< "$MATRIX"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Matrix entries:" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.include[] | "- `scan_label=\(.scan_label)`, `source=\(.source)`, `output_prefix=\(.output_prefix)`, `ecosystems=\(.ecosystems | join(","))`"' <<< "$MATRIX" >> "$GITHUB_STEP_SUMMARY"
 
   generate-sbom:
     name: Generate SBOM (${{ matrix.scan_label }})
@@ -155,14 +148,28 @@ jobs:
           token: ${{ github.token }}
           fetch-depth: 0
 
+      - name: Log SBOM matrix entry
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'SBOM matrix entry:'
+          jq -n \
+            --arg scan_kind '${{ matrix.scan_kind }}' \
+            --arg scan_label '${{ matrix.scan_label }}' \
+            --arg source '${{ matrix.source }}' \
+            --arg output_prefix '${{ matrix.output_prefix }}' \
+            --argjson ecosystems '${{ toJson(matrix.ecosystems) }}' \
+            '{scan_kind:$scan_kind, scan_label:$scan_label, source:$source, output_prefix:$output_prefix, ecosystems:$ecosystems}'
+
       - name: Run SBOM core action
-        uses: sumathi-thirumani/shared-gha-tools/.github/actions/sbom-generation@feature/dependency-graph-refresh
+        uses: tsumrad/shared-gha-tools/.github/actions/sbom-generation@sbom-generation
         with:
           # Generate the CycloneDX inventory used by security/compliance tooling.
           source: ${{ matrix.source }}
           output_prefix: ${{ matrix.output_prefix }}
           syft_version: ${{ needs.prepare-matrix.outputs.syft_version }}
           scan_label: ${{ matrix.scan_label }}
+          ecosystems: ${{ toJson(matrix.ecosystems) }}
 
       - name: Verify SBOM output
         shell: bash
@@ -206,8 +213,22 @@ jobs:
           token: ${{ github.token }}
           fetch-depth: 0
 
+      - name: Log dependency graph matrix entry
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'Dependency graph matrix entry:'
+          jq -n \
+            --arg scan_kind '${{ matrix.scan_kind }}' \
+            --arg scan_label '${{ matrix.scan_label }}' \
+            --arg source '${{ matrix.source }}' \
+            --arg output_prefix '${{ matrix.output_prefix }}' \
+            --argjson ecosystems '${{ toJson(matrix.ecosystems) }}' \
+            '{scan_kind:$scan_kind, scan_label:$scan_label, source:$source, output_prefix:$output_prefix, ecosystems:$ecosystems}'
+
       - name: Refresh GitHub Dependency Graph
-        uses: sumathi-thirumani/shared-gha-tools/.github/actions/refresh-dependency-graph@feature/dependency-graph-refresh
+        uses: tsumrad/shared-gha-tools/.github/actions/refresh-dependency-graph@sbom-generation
         with:
           scan_label: ${{ matrix.scan_label }}
           source_dir: ${{ matrix.source }}
+          detector_args: ${{ needs.prepare-matrix.outputs.graph_refresh_args }}
