@@ -37,7 +37,7 @@ async def async_main() -> None:
     parser.add_argument("--repo",  required=True, help="Repository name.")
     args = parser.parse_args(normalize_duplicated_invocation(sys.argv[1:]))
 
-    repo = f"{args.owner}/{args.repo}"      # ← string, matches run(repo: str)
+    repo = {"owner": args.owner, "name": args.repo}
 
     orchestrator = SecurityOrchestrator(
         VulnerabilityCollectorAgent(),
