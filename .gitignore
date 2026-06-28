@@ -1,2 +1,2 @@
-security-remediation-agent/tests/__pycache__/test_codescanning_alerts_tool.cpython-314.pyc
-security-remediation-agent/tests/__pycache__/
+__pycache__/
+*.py[cod]

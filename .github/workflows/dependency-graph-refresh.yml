@@ -99,7 +99,7 @@ jobs:
 
       - name: Build scan matrix
         id: matrix
-        uses: tsumrad/shared-gha-tools/.github/actions/build-ecosystem-matrix@sbom-generation
+        uses: tsumrad/octo-gha-tools/.github/actions/build-ecosystem-matrix@agent-remediation
         with:
           # Detect ecosystem manifests, skip generated/vendor folders, and emit
           # one matrix entry for each filesystem SBOM target.
@@ -162,7 +162,7 @@ jobs:
             '{scan_kind:$scan_kind, scan_label:$scan_label, source:$source, output_prefix:$output_prefix, ecosystems:$ecosystems}'
 
       - name: Run SBOM core action
-        uses: tsumrad/shared-gha-tools/.github/actions/sbom-generation@sbom-generation
+        uses: tsumrad/octo-gha-tools/.github/actions/agent-remediation@agent-remediation
         with:
           # Generate the CycloneDX inventory used by security/compliance tooling.
           source: ${{ matrix.source }}
@@ -227,7 +227,7 @@ jobs:
             '{scan_kind:$scan_kind, scan_label:$scan_label, source:$source, output_prefix:$output_prefix, ecosystems:$ecosystems}'
 
       - name: Refresh GitHub Dependency Graph
-        uses: tsumrad/shared-gha-tools/.github/actions/refresh-dependency-graph@sbom-generation
+        uses: tsumrad/octo-gha-tools/.github/actions/refresh-dependency-graph@agent-remediation
         with:
           scan_label: ${{ matrix.scan_label }}
           source_dir: ${{ matrix.source }}
