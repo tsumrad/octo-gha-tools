@@ -40,9 +40,11 @@ async def async_main() -> None:
     repo = f"{args.owner}/{args.repo}"      # ← string, matches run(repo: str)
 
     orchestrator = SecurityOrchestrator(
-        vulnerability_collector    = VulnerabilityCollectorAgent(),
-        vulnerability_triage_agent = VulnerabilityTriageAgent(),
-        remediation_planner        = RemediationPlannerAgent(),
+        VulnerabilityCollectorAgent(),
+        VulnerabilityTriageAgent(),
+        RemediationPlannerAgent(),
+        reviewer=None,
+        reporter=None,
     )
 
     result = await orchestrator.run(repo)
