@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from langchain_core.tools import tool
-from packaging.version import Version
+from packaging.version import Version, InvalidVersion
 
 from ...models.remediation_plan import (
     ActionPlan,
@@ -57,11 +57,16 @@ def build_direct_plan(pkg: SecurityPackageTriage) -> RemediationPlan:
                 pkg.non_breaking_upgrade_version and pkg.breaking_upgrade_version
             ),
             patch_available=pkg.pull_patch is not None,
+            # BUG-6 FIX: pass deduped ghsas list, not raw vulnerabilities,
+            # so ghsas_closed_by cannot emit duplicates regardless of how
+            # many duplicate VulnerabilityAlert entries the triage carries.
             non_breaking_closes=ghsas_closed_by(
+                ghsas,
                 pkg.vulnerabilities,
                 pkg.non_breaking_upgrade_version,
             ),
             breaking_closes=ghsas_closed_by(
+                ghsas,
                 pkg.vulnerabilities,
                 pkg.breaking_upgrade_version,
             ),
@@ -103,21 +108,27 @@ def build_direct_plan(pkg: SecurityPackageTriage) -> RemediationPlan:
 
 def build_transitive_plan(pkg: SecurityPackageTriage) -> RemediationPlan:
     """
-    For transitive findings we don't plan a fix against pkg itself — pkg isn't
-    declared anywhere we can bump directly. Instead we look for an existing PR
-    that bumps one of pkg.transitive_source_package, and point the action at
-    that. If no such PR exists, we open an issue naming the source package(s)
-    that need to be bumped, rather than stubbing a placeholder PR we have no
-    basis to author.
+    For transitive findings we cannot bump pkg itself — it is not declared in
+    the project's manifest. The fix must come from bumping one of the direct
+    dependencies that pulls pkg in (transitive_source_package).
+
+    Decision tree
+    ─────────────
+    1. No source identified → open_issue (triage data incomplete).
+    2. Source identified, adequate PR exists (bumps source to >= required fix)
+       → point action at that PR (rollup_pr / standalone_pr).
+    3. Source identified, PR exists but undershoots the required version
+       → placeholder_pr targeting the source at the required version,
+         with a note that the existing PR is insufficient.
+    4. Source identified, no PR at all, but source has a known fix version
+       → placeholder_pr targeting source@required_version.
+    5. Source identified, no PR, no known fix for the source
+       → open_issue with full transitive chain context.
     """
     severity = normalize_severity(pkg.vulnerabilities)
     ghsas = dedupe_ghsas(pkg.vulnerabilities)
 
     if not pkg.transitive_source_package:
-        # Upstream triage marked this transitive but never identified what
-        # pulls it in. We can't search for a source PR or target a bump
-        # against nothing, so surface this loudly instead of producing a
-        # plan with a silently blank target_package.
         action = ActionPlan(
             action_type=ActionType.OPEN_ISSUE,
             pull_url="",
@@ -126,11 +137,19 @@ def build_transitive_plan(pkg: SecurityPackageTriage) -> RemediationPlan:
             issue_title=build_missing_source_issue_title(pkg, severity),
             target_package="UNKNOWN_SOURCE_PACKAGE",
         )
-        return _finalize_transitive_plan(pkg, severity, ghsas, action, "unidentified")
+        return _finalize_transitive_plan(
+            pkg, severity, ghsas, action,
+            source_package="unidentified",
+            source_required_version=None,
+            undershooting_pr=None,
+        )
 
-    source_pr, source_package = find_source_pull_metadata(pkg)
+    # BUG-1 + BUG-2 FIX: strip the "@version" suffix before comparing, and
+    # only accept PRs whose bump target satisfies the required fix version.
+    source_pr, source_package, source_required_version = find_source_pull_metadata(pkg)
 
     if source_pr is not None:
+        # Case 2: found a PR that adequately covers the required version bump.
         action_type = (
             ActionType.ROLLUP_PR
             if len(source_pr.version_bumps) > 1
@@ -144,17 +163,59 @@ def build_transitive_plan(pkg: SecurityPackageTriage) -> RemediationPlan:
             issue_title="",
             target_package=source_package,
         )
+        return _finalize_transitive_plan(
+            pkg, severity, ghsas, action,
+            source_package=source_package,
+            source_required_version=source_required_version,
+            undershooting_pr=None,
+        )
+
+    # No adequate PR found. Check whether there is an *undershooting* PR
+    # (exists but targets a version below what's needed) so we can note it.
+    undershooting_pr, _ = find_undershooting_pr(pkg, source_package)
+
+    if source_required_version:
+        # Cases 3 & 4: we know what version the source needs to reach.
+        # BUG-4 FIX: produce a placeholder_pr (not open_issue) so the
+        # workflow generates a stub issue/PR tracking the source bump.
+        action = ActionPlan(
+            action_type=ActionType.PLACEHOLDER_PR,
+            pull_url="",
+            pr_number=None,
+            placeholder_markdown=build_transitive_placeholder_markdown(
+                pkg=pkg,
+                severity=severity,
+                ghsas=ghsas,
+                source_package=source_package,
+                source_required_version=source_required_version,
+                undershooting_pr=undershooting_pr,
+            ),
+            issue_title="",
+            target_package=source_package,
+        )
     else:
+        # Case 5: source package has no known fix version either.
         action = ActionPlan(
             action_type=ActionType.OPEN_ISSUE,
             pull_url="",
             pr_number=None,
             placeholder_markdown="",
-            issue_title=build_transitive_issue_title(pkg, severity, source_package),
+            issue_title=build_transitive_issue_title(
+                pkg=pkg,
+                severity=severity,
+                source_package=source_package,
+                source_required_version=None,
+                undershooting_pr=undershooting_pr,
+            ),
             target_package=source_package,
         )
 
-    return _finalize_transitive_plan(pkg, severity, ghsas, action, source_package)
+    return _finalize_transitive_plan(
+        pkg, severity, ghsas, action,
+        source_package=source_package,
+        source_required_version=source_required_version,
+        undershooting_pr=undershooting_pr,
+    )
 
 
 def _finalize_transitive_plan(
@@ -163,7 +224,37 @@ def _finalize_transitive_plan(
     ghsas: list[str],
     action: ActionPlan,
     source_package: str,
+    source_required_version: str | None,
+    undershooting_pr: PullRequestMetadata | None,
 ) -> RemediationPlan:
+    # BUG-3 FIX: derive the real fix_class from whether the source package
+    # has a known required version, instead of always hardcoding NO_FIX_AVAILABLE.
+    # For transitive findings the "fix" is always expressed in terms of the
+    # source package, so non_breaking_fix / breaking_fix hold the source version.
+    if source_required_version:
+        fix_class = FixClass.NON_BREAKING_BUMP
+        non_breaking_fix: str | None = source_required_version
+        breaking_fix: str | None = None
+        upgrade_version = source_required_version
+    else:
+        fix_class = FixClass.NO_FIX_AVAILABLE
+        non_breaking_fix = None
+        breaking_fix = None
+        upgrade_version = ""
+
+    # BUG-6 FIX (transitive path): use the already-deduped ghsas list.
+    non_breaking_closes = ghsas_closed_by(ghsas, pkg.vulnerabilities, source_required_version)
+
+    audit_detail = (
+        f"transitive_via={source_package or 'unidentified'}, "
+        f"action={action.action_type.value}, "
+        f"severity={severity}"
+    )
+    if source_required_version:
+        audit_detail += f", source_fix_version={source_required_version}"
+    if undershooting_pr:
+        audit_detail += f", undershooting_pr=#{undershooting_pr.pr_number}"
+
     return RemediationPlan(
         plan_id=f"plan_{pkg.package}_{pkg.ecosystem}_{date.today():%Y%m%d}",
         created_at=datetime.utcnow(),
@@ -178,13 +269,13 @@ def _finalize_transitive_plan(
             unique_ghsas=ghsas,
         ),
         fix=FixPlan(
-            fix_class=FixClass.NO_FIX_AVAILABLE,
-            non_breaking_fix=None,
-            breaking_fix=None,
-            upgrade_version="",
+            fix_class=fix_class,
+            non_breaking_fix=non_breaking_fix,
+            breaking_fix=breaking_fix,
+            upgrade_version=upgrade_version,
             partial_fix_available=False,
             patch_available=False,
-            non_breaking_closes=[],
+            non_breaking_closes=non_breaking_closes,
             breaking_closes=[],
         ),
         action=action,
@@ -197,44 +288,182 @@ def _finalize_transitive_plan(
                 timestamp=datetime.utcnow().isoformat(),
                 agent="remediation_planner",
                 action="plan_created",
-                detail=(
-                    f"transitive_via={source_package or 'unidentified'}, "
-                    f"action={action.action_type.value}, "
-                    f"severity={severity}"
-                ),
+                detail=audit_detail,
             )
         ],
     )
 
 
+def _strip_version_suffix(package_ref: str) -> str:
+    """
+    Strip a pinned version from a package reference.
+    'axios@0.28.1'          → 'axios'
+    '@vue/cli-service@4.5.19' → '@vue/cli-service'   (scoped npm package)
+    'axios'                 → 'axios'  (no suffix, no-op)
+    """
+    # Scoped npm packages start with '@'; the version separator is the
+    # *second* '@'. Split on '@' and reconstruct carefully.
+    parts = package_ref.split("@")
+    if package_ref.startswith("@"):
+        # ['', 'scope/name', '1.2.3']  →  '@scope/name'
+        return "@" + parts[1] if len(parts) >= 3 else package_ref
+    # ['name', '1.2.3']  →  'name'
+    return parts[0]
+
+
+def _version_satisfies_minimum(version_str: str, minimum: str) -> bool:
+    """Return True if version_str >= minimum (both must be parseable)."""
+    try:
+        return Version(version_str) >= Version(minimum)
+    except InvalidVersion:
+        return False
+
+
 def find_source_pull_metadata(
     pkg: SecurityPackageTriage,
-) -> tuple[PullRequestMetadata | None, str]:
+) -> tuple[PullRequestMetadata | None, str, str | None]:
     """
-    Search pkg.pull_metadata (all PRs seen for this finding's repo context)
-    for one whose version_bumps touches one of pkg.transitive_source_package.
-    Returns the matching PR and the source package name it matched on, or
-    (None, first_source) if nothing matches.
+    Search pkg.pull_metadata for a PR that:
+      (a) bumps one of pkg.transitive_source_package, AND
+      (b) bumps it to a version >= the required fix version for that source
+          (derived from pkg.non_breaking_upgrade_version /
+           pkg.breaking_upgrade_version on the *source* triage — approximated
+           here as pkg.remediated_version which the triage populates for the
+           child, or pkg.non_breaking_upgrade_version if set).
+
+    BUG-1 FIX: strip '@version' suffix from transitive_source_package entries
+               before comparing to bump.package.
+    BUG-2 FIX: reject PRs whose bump target undershoots the required version.
+
+    Returns (matching_pr, source_package_name, required_version) or
+            (None, first_source_name, required_version).
+    The required_version is derived from pkg even when no PR matches, so the
+    caller can still produce a placeholder_pr targeting that version.
     """
     sources = pkg.transitive_source_package or []
+
+    # The required version to fix the *child* pkg is what the triage reports.
+    # For a transitive finding, pkg.remediated_version is the child's fix
+    # version (e.g. form-data >= 4.0.6), but what we need to bump is the
+    # *source*. The source's required version is stored on the source's own
+    # triage; we approximate it here using the pkg's upgrade fields which
+    # reflect what version of the source closes the child advisory.
+    required_version: str | None = (
+        pkg.non_breaking_upgrade_version
+        or pkg.breaking_upgrade_version
+        or pkg.upgrade_version
+        or None
+    )
+
     for source in sources:
+        source_name = _strip_version_suffix(source)   # BUG-1 FIX
         for pr in pkg.pull_metadata:
             for bump in pr.version_bumps:
-                if bump.package.lower() == source.lower():
-                    return pr, source
-    return None, (sources[0] if sources else "")
+                if bump.package.lower() != source_name.lower():
+                    continue
+                # BUG-2 FIX: check the PR actually reaches the required version.
+                if required_version and not _version_satisfies_minimum(
+                    bump.to_version, required_version
+                ):
+                    continue  # PR exists but undershoots — keep searching
+                return pr, source_name, required_version
+
+    return None, (_strip_version_suffix(sources[0]) if sources else ""), required_version
+
+
+def find_undershooting_pr(
+    pkg: SecurityPackageTriage,
+    source_name: str,
+) -> tuple[PullRequestMetadata | None, str]:
+    """
+    Return the first PR that bumps source_name but to an insufficient version.
+    Used to surface the 'existing PR undershoots' note in placeholder markdown
+    and issue titles.
+    """
+    for pr in pkg.pull_metadata:
+        for bump in pr.version_bumps:
+            if bump.package.lower() == source_name.lower():
+                return pr, bump.to_version
+    return None, ""
+
+
+# ── Content builders ──────────────────────────────────────────────────────────
+
+def build_transitive_placeholder_markdown(
+    pkg: SecurityPackageTriage,
+    severity: str,
+    ghsas: list[str],
+    source_package: str,
+    source_required_version: str,
+    undershooting_pr: PullRequestMetadata | None,
+) -> str:
+    """
+    BUG-4 + BUG-5 FIX: produce a placeholder_pr markdown (not open_issue) when
+    the source package has a known fix version, and include full transitive
+    chain context — child package, affected version range, GHSAs, and a note
+    about any existing PR that falls short.
+    """
+    sources_str = ", ".join(pkg.transitive_source_package)
+
+    undershoot_note = ""
+    if undershooting_pr:
+        _, to_ver = find_undershooting_pr(pkg, source_package)
+        undershoot_note = (
+            f"\n> ⚠️ **Existing PR #{undershooting_pr.pr_number} is insufficient** — "
+            f"it bumps `{source_package}` to `{to_ver}`, which does not reach the "
+            f"required `{source_required_version}`. "
+            f"[View PR]({undershooting_pr.pull_url})\n"
+        )
+
+    return f"""## Security remediation — {source_package} ({pkg.ecosystem}) [transitive]
+
+**Severity:** {severity.upper()}
+**Action required:** Bump `{source_package}` to `>= {source_required_version}`
+**Breaking change:** No
+**GHSAs:** {", ".join(ghsas)}
+{undershoot_note}
+### Transitive vulnerability chain
+
+| Field | Value |
+|---|---|
+| Vulnerable package | `{pkg.package}` |
+| Vulnerable range | `{pkg.current_version_range}` |
+| Pulled in via | {sources_str} |
+| Fix: upgrade source to | `{source_package} >= {source_required_version}` |
+
+### Vulnerability summary
+{build_vuln_summary_lines(pkg.vulnerabilities)}
+
+### Resolution options
+- [ ] Assign to coding agent (Copilot / LLM) to author the fix PR
+- [ ] Self-resolve — bump `{source_package}` to `>= {source_required_version}` manually
+
+### Notes
+_Add context, blockers, or migration hints here._
+"""
 
 
 def build_transitive_issue_title(
     pkg: SecurityPackageTriage,
     severity: str,
     source_package: str,
+    source_required_version: str | None,
+    undershooting_pr: PullRequestMetadata | None,
 ) -> str:
+    """
+    BUG-5 FIX: include the child package name, the source package, the required
+    version (if known), and a flag when an existing PR undershoots, so the
+    issue title is self-contained and actionable without opening the body.
+    """
     via = source_package or "an unidentified parent package"
+    version_hint = f" (requires {source_package} >= {source_required_version})" if source_required_version else ""
+    pr_note = f" — existing PR #{undershooting_pr.pr_number} undershoots" if undershooting_pr else " — no source PR found"
+
     return (
         f"Security remediation — {severity.upper()} — "
-        f"{pkg.package} ({pkg.ecosystem}) — transitive via {via}, "
-        f"no source PR found"
+        f"{pkg.package} ({pkg.ecosystem}) — transitive via {via}"
+        f"{version_hint}"
+        f"{pr_note}"
     )
 
 
@@ -245,6 +474,8 @@ def build_missing_source_issue_title(pkg: SecurityPackageTriage, severity: str) 
         f"package identified (triage data incomplete, needs investigation)"
     )
 
+
+# ── Fix classification helpers ────────────────────────────────────────────────
 
 def derive_fix_class(pkg: SecurityPackageTriage) -> FixClass:
     if not pkg.isupgradable:
@@ -352,6 +583,8 @@ def build_issue_title(pkg: SecurityPackageTriage, severity: str) -> str:
     )
 
 
+# ── Utilities ─────────────────────────────────────────────────────────────────
+
 def normalize_severity(vulnerabilities: list) -> str:
     order = {"critical": 4, "high": 3, "medium": 2, "low": 1}
     if not vulnerabilities:
@@ -378,15 +611,40 @@ def dedupe_ghsas(vulnerabilities: list) -> list[str]:
     return output
 
 
-def ghsas_closed_by(vulnerabilities: list, target_version: str) -> list[str]:
+def ghsas_closed_by(
+    deduped_ghsas: list[str],
+    vulnerabilities: list,
+    target_version: str | None,
+) -> list[str]:
+    """
+    BUG-6 FIX: accepts the already-deduped ghsas list as the source of truth
+    for which IDs to return, and uses vulnerabilities only for the
+    first_patched lookup. This prevents duplicate GHSA entries regardless
+    of how many duplicate VulnerabilityAlert objects the triage carries.
+    """
     if not target_version:
         return []
-    target = Version(target_version)
-    return [
-        vulnerability.ghsa_id
-        for vulnerability in vulnerabilities
-        if vulnerability.first_patched and Version(vulnerability.first_patched) <= target
-    ]
+    try:
+        target = Version(target_version)
+    except InvalidVersion:
+        return []
+
+    # Build a lookup: ghsa_id → first_patched from the raw vulnerability list.
+    patched_for: dict[str, str] = {}
+    for v in vulnerabilities:
+        if v.ghsa_id not in patched_for and v.first_patched:
+            patched_for[v.ghsa_id] = v.first_patched
+
+    result = []
+    for ghsa_id in deduped_ghsas:          # iterate deduped list → no duplicates
+        first_patched = patched_for.get(ghsa_id)
+        if first_patched:
+            try:
+                if Version(first_patched) <= target:
+                    result.append(ghsa_id)
+            except InvalidVersion:
+                pass
+    return result
 
 
 def build_vuln_summary(vulnerabilities: list) -> str:
