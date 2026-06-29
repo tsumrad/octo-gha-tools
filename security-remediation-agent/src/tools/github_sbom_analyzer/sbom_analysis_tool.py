@@ -235,11 +235,23 @@ class SBOMGraph:
 
 
 def _relationship_element_id(rel) -> str:
-    return getattr(rel, "element_id", getattr(rel, "spdx_element_id"))
+    value = getattr(rel, "element_id", None)
+    if value is not None:
+        return value
+    value = getattr(rel, "spdx_element_id", None)
+    if value is not None:
+        return value
+    raise AttributeError("Relationship is missing an element SPDX id.")
 
 
 def _relationship_related_id(rel) -> str:
-    return getattr(rel, "related_spdx_element_id", getattr(rel, "related_spdx_element"))
+    value = getattr(rel, "related_spdx_element_id", None)
+    if value is not None:
+        return value
+    value = getattr(rel, "related_spdx_element", None)
+    if value is not None:
+        return value
+    raise AttributeError("Relationship is missing a related SPDX element id.")
 
 
 # ── Output ────────────────────────────────────────────────────────────────────
