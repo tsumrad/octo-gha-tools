@@ -112,6 +112,22 @@ def build_transitive_plan(pkg: SecurityPackageTriage) -> RemediationPlan:
     """
     severity = normalize_severity(pkg.vulnerabilities)
     ghsas = dedupe_ghsas(pkg.vulnerabilities)
+
+    if not pkg.transitive_source_package:
+        # Upstream triage marked this transitive but never identified what
+        # pulls it in. We can't search for a source PR or target a bump
+        # against nothing, so surface this loudly instead of producing a
+        # plan with a silently blank target_package.
+        action = ActionPlan(
+            action_type=ActionType.OPEN_ISSUE,
+            pull_url="",
+            pr_number=None,
+            placeholder_markdown="",
+            issue_title=build_missing_source_issue_title(pkg, severity),
+            target_package="UNKNOWN_SOURCE_PACKAGE",
+        )
+        return _finalize_transitive_plan(pkg, severity, ghsas, action, "unidentified")
+
     source_pr, source_package = find_source_pull_metadata(pkg)
 
     if source_pr is not None:
@@ -138,6 +154,16 @@ def build_transitive_plan(pkg: SecurityPackageTriage) -> RemediationPlan:
             target_package=source_package,
         )
 
+    return _finalize_transitive_plan(pkg, severity, ghsas, action, source_package)
+
+
+def _finalize_transitive_plan(
+    pkg: SecurityPackageTriage,
+    severity: str,
+    ghsas: list[str],
+    action: ActionPlan,
+    source_package: str,
+) -> RemediationPlan:
     return RemediationPlan(
         plan_id=f"plan_{pkg.package}_{pkg.ecosystem}_{date.today():%Y%m%d}",
         created_at=datetime.utcnow(),
@@ -172,7 +198,7 @@ def build_transitive_plan(pkg: SecurityPackageTriage) -> RemediationPlan:
                 agent="remediation_planner",
                 action="plan_created",
                 detail=(
-                    f"transitive_via={source_package or 'unknown'}, "
+                    f"transitive_via={source_package or 'unidentified'}, "
                     f"action={action.action_type.value}, "
                     f"severity={severity}"
                 ),
@@ -209,6 +235,14 @@ def build_transitive_issue_title(
         f"Security remediation — {severity.upper()} — "
         f"{pkg.package} ({pkg.ecosystem}) — transitive via {via}, "
         f"no source PR found"
+    )
+
+
+def build_missing_source_issue_title(pkg: SecurityPackageTriage, severity: str) -> str:
+    return (
+        f"Security remediation — {severity.upper()} — "
+        f"{pkg.package} ({pkg.ecosystem}) — marked transitive but no source "
+        f"package identified (triage data incomplete, needs investigation)"
     )
 
 
