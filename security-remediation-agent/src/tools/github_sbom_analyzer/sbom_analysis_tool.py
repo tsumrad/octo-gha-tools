@@ -147,14 +147,16 @@ class SBOMGraph:
         parents:  Dict[str, Set[str]] = defaultdict(set)
         for rel in doc.relationships:
             if rel.relationship_type == RelationshipType.DEPENDS_ON:
-                children[rel.element_id].add(rel.related_spdx_element_id)
-                parents[rel.related_spdx_element_id].add(rel.element_id)
+                element_id = _relationship_element_id(rel)
+                related_id = _relationship_related_id(rel)
+                children[element_id].add(related_id)
+                parents[related_id].add(element_id)
 
         # Root package = what DOCUMENT DESCRIBES
         roots = {
-            rel.related_spdx_element_id
+            _relationship_related_id(rel)
             for rel in doc.relationships
-            if rel.element_id == ROOT_SPDX_ID
+            if _relationship_element_id(rel) == ROOT_SPDX_ID
             and rel.relationship_type == RelationshipType.DESCRIBES
         } or {ROOT_SPDX_ID}
 
@@ -230,6 +232,14 @@ class SBOMGraph:
     def list_ecosystems(self) -> List[str]:
         """Return sorted list of distinct ecosystems present in the SBOM."""
         return sorted({_ecosystem_from_purl(self._purl(p)) for p in self.doc.packages})
+
+
+def _relationship_element_id(rel) -> str:
+    return getattr(rel, "element_id", getattr(rel, "spdx_element_id"))
+
+
+def _relationship_related_id(rel) -> str:
+    return getattr(rel, "related_spdx_element_id", getattr(rel, "related_spdx_element"))
 
 
 # ── Output ────────────────────────────────────────────────────────────────────
