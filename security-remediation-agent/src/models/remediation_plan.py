@@ -38,8 +38,8 @@ class PackageContext:
     current_version_range: str
     remediated_version: str
     effective_severity: str            # highest across all vulnerabilities
-    relationships: list[str]           # ["direct", "transitive"]
-    transitive_source_package: str
+    relationship: str            # "direct" | "transitive" | "indirect" | "unknown"
+    transitive_source_package: list[str]
     unique_ghsas: list[str]
 
 
@@ -62,6 +62,9 @@ class ActionPlan:
     pr_number: int | None              # existing PR number if available
     placeholder_markdown: str          # populated when action_type = PLACEHOLDER_PR
     issue_title: str                   # populated when action_type = OPEN_ISSUE
+    target_package: str                = ""  # package the action actually bumps —
+                                              # == package.name for direct findings,
+                                              # == the source package for transitive ones
 
 
 @dataclass

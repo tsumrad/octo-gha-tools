@@ -16,6 +16,7 @@ from ...models.remediation_plan import (
     RemediationPlan,
 )
 from ...models.security_package_triage import SecurityPackageTriage
+from ...tools.github_pr_collector.model.pull_request_metadata import PullRequestMetadata
 
 
 @tool("build_remediation_plan")
@@ -23,6 +24,12 @@ def build_remediation_plan(
     pkg: SecurityPackageTriage,
 ) -> RemediationPlan:
     """Build a remediation plan from a package vulnerability triage result."""
+    if pkg.istransitive:
+        return build_transitive_plan(pkg)
+    return build_direct_plan(pkg)
+
+
+def build_direct_plan(pkg: SecurityPackageTriage) -> RemediationPlan:
     fix_class = derive_fix_class(pkg)
     action_type = derive_action_type(pkg, fix_class)
     severity = normalize_severity(pkg.vulnerabilities)
@@ -37,7 +44,7 @@ def build_remediation_plan(
             current_version_range=pkg.current_version_range,
             remediated_version=pkg.remediated_version,
             effective_severity=severity,
-            relationships=derive_relationships(pkg),
+            relationship=derive_relationship(pkg),
             transitive_source_package=pkg.transitive_source_package,
             unique_ghsas=ghsas,
         ),
@@ -73,6 +80,7 @@ def build_remediation_plan(
                 if action_type == ActionType.OPEN_ISSUE
                 else ""
             ),
+            target_package=pkg.package,
         ),
         state=PlanState(
             issue_id=pkg.issue_metadata.get("id", ""),
@@ -90,6 +98,117 @@ def build_remediation_plan(
                 ),
             )
         ],
+    )
+
+
+def build_transitive_plan(pkg: SecurityPackageTriage) -> RemediationPlan:
+    """
+    For transitive findings we don't plan a fix against pkg itself — pkg isn't
+    declared anywhere we can bump directly. Instead we look for an existing PR
+    that bumps one of pkg.transitive_source_package, and point the action at
+    that. If no such PR exists, we open an issue naming the source package(s)
+    that need to be bumped, rather than stubbing a placeholder PR we have no
+    basis to author.
+    """
+    severity = normalize_severity(pkg.vulnerabilities)
+    ghsas = dedupe_ghsas(pkg.vulnerabilities)
+    source_pr, source_package = find_source_pull_metadata(pkg)
+
+    if source_pr is not None:
+        action_type = (
+            ActionType.ROLLUP_PR
+            if len(source_pr.version_bumps) > 1
+            else ActionType.STANDALONE_PR
+        )
+        action = ActionPlan(
+            action_type=action_type,
+            pull_url=source_pr.pull_url,
+            pr_number=source_pr.pr_number,
+            placeholder_markdown="",
+            issue_title="",
+            target_package=source_package,
+        )
+    else:
+        action = ActionPlan(
+            action_type=ActionType.OPEN_ISSUE,
+            pull_url="",
+            pr_number=None,
+            placeholder_markdown="",
+            issue_title=build_transitive_issue_title(pkg, severity, source_package),
+            target_package=source_package,
+        )
+
+    return RemediationPlan(
+        plan_id=f"plan_{pkg.package}_{pkg.ecosystem}_{date.today():%Y%m%d}",
+        created_at=datetime.utcnow(),
+        package=PackageContext(
+            name=pkg.package,
+            ecosystem=pkg.ecosystem,
+            current_version_range=pkg.current_version_range,
+            remediated_version=pkg.remediated_version,
+            effective_severity=severity,
+            relationship="transitive",
+            transitive_source_package=pkg.transitive_source_package,
+            unique_ghsas=ghsas,
+        ),
+        fix=FixPlan(
+            fix_class=FixClass.NO_FIX_AVAILABLE,
+            non_breaking_fix=None,
+            breaking_fix=None,
+            upgrade_version="",
+            partial_fix_available=False,
+            patch_available=False,
+            non_breaking_closes=[],
+            breaking_closes=[],
+        ),
+        action=action,
+        state=PlanState(
+            issue_id=pkg.issue_metadata.get("id", ""),
+            issue_url=pkg.issue_metadata.get("url", ""),
+        ),
+        audit=[
+            AuditEntry(
+                timestamp=datetime.utcnow().isoformat(),
+                agent="remediation_planner",
+                action="plan_created",
+                detail=(
+                    f"transitive_via={source_package or 'unknown'}, "
+                    f"action={action.action_type.value}, "
+                    f"severity={severity}"
+                ),
+            )
+        ],
+    )
+
+
+def find_source_pull_metadata(
+    pkg: SecurityPackageTriage,
+) -> tuple[PullRequestMetadata | None, str]:
+    """
+    Search pkg.pull_metadata (all PRs seen for this finding's repo context)
+    for one whose version_bumps touches one of pkg.transitive_source_package.
+    Returns the matching PR and the source package name it matched on, or
+    (None, first_source) if nothing matches.
+    """
+    sources = pkg.transitive_source_package or []
+    for source in sources:
+        for pr in pkg.pull_metadata:
+            for bump in pr.version_bumps:
+                if bump.package.lower() == source.lower():
+                    return pr, source
+    return None, (sources[0] if sources else "")
+
+
+def build_transitive_issue_title(
+    pkg: SecurityPackageTriage,
+    severity: str,
+    source_package: str,
+) -> str:
+    via = source_package or "an unidentified parent package"
+    return (
+        f"Security remediation — {severity.upper()} — "
+        f"{pkg.package} ({pkg.ecosystem}) — transitive via {via}, "
+        f"no source PR found"
     )
 
 
@@ -206,13 +325,14 @@ def normalize_severity(vulnerabilities: list) -> str:
     return max(vulnerabilities, key=lambda v: order.get(v.severity, 0)).severity
 
 
-def derive_relationships(pkg: SecurityPackageTriage) -> list[str]:
-    rels = set()
-    for vulnerability in pkg.vulnerabilities:
-        rels.add(vulnerability.relationship)
+def derive_relationship(pkg: SecurityPackageTriage) -> str:
     if pkg.istransitive:
-        rels.add("transitive")
-    return sorted(rels)
+        return "transitive"
+    if any(vulnerability.relationship.lower() == "direct" for vulnerability in pkg.vulnerabilities):
+        return "direct"
+    if pkg.vulnerabilities:
+        return pkg.vulnerabilities[0].relationship
+    return "unknown"
 
 
 def dedupe_ghsas(vulnerabilities: list) -> list[str]:
