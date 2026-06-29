@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import os
 import re
 import tempfile
@@ -72,7 +73,7 @@ def _ecosystem_from_purl(purl: Optional[str]) -> str:
 def fetch_github_sbom(repo: str) -> Document:
     owner, name = _parse_repo(repo)
     url = f"{GITHUB_API}/repos/{owner}/{name}/dependency-graph/sbom"
-    print(f"[*] Fetching SBOM: {url}")
+    print(f"[*] Fetching SBOM: {url}", file=sys.stderr)
 
     resp = requests.get(url, headers=_gh_headers(), timeout=30)
     _check_response(resp)
@@ -90,14 +91,14 @@ def fetch_github_sbom(repo: str) -> Document:
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
-    print(f"[✓] {len(doc.packages)} packages in '{doc.creation_info.name}'")
+    print(f"[✓] {len(doc.packages)} packages in '{doc.creation_info.name}'", file=sys.stderr)
     return doc
 
 
 def load_local_sbom(path: Path) -> Document:
-    print(f"[*] Loading local SBOM: {path}")
+    print(f"[*] Loading local SBOM: {path}", file=sys.stderr)
     doc = parse_file(str(path))
-    print(f"[✓] {len(doc.packages)} packages in '{doc.creation_info.name}'")
+    print(f"[✓] {len(doc.packages)} packages in '{doc.creation_info.name}'", file=sys.stderr)
     return doc
 
 
