@@ -18,7 +18,7 @@ class SecurityPackageTriage:
     upgrade_version: str = ""
 
     istransitive: bool = False
-    transitive_source_package: str = ""
+    transitive_source_package: list[str] = field(default_factory=list)
 
     is_pull_available: bool = False
     pull_metadata: list[PullRequestMetadata] = field(default_factory=list)

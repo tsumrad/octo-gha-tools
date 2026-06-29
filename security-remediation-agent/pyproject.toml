@@ -29,6 +29,7 @@ dependencies = [
   "langchain-core>=0.2.0",
   "openai>=1.30.0",
   "tomli>=2.4.1",
+  "spdx-tools>=0.8.3",
 ]
 
 [project.optional-dependencies]
