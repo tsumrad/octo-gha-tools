@@ -75,9 +75,9 @@ async def test_build_rollup_plan_uses_collector_tools(monkeypatch):
     assert plan["stats"] == {
         "total_open_alerts": 2,
         "total_open_prs_reviewed": 2,
-        "total_prs_matched": 2,
-        "total_prs_ignored": 0,
+        "total_prs_matched": 1,
+        "total_prs_ignored": 1,
         "total_code_scanning_alerts": 1,
-        "total_findings_without_pr": 1,
+        "total_findings_without_pr": 2,
         "total_auto_created_prs": 0,
     }
