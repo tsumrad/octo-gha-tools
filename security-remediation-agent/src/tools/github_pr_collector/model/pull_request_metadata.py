@@ -95,8 +95,6 @@ def filter_security_dependency_pull_requests(
 ) -> list[dict[str, Any]]:
 
     candidates: list[dict[str, Any]] = []
-    alerts_by_package = build_alerts_by_package(alerts)
-    severity_filter = set(severities or DEFAULT_SEVERITIES)
 
     for pull_request in pull_requests:
         user = pull_request.get("user") or {}
@@ -109,21 +107,7 @@ def filter_security_dependency_pull_requests(
             continue
 
         version_bumps = parse_version_bumps(pull_request.get("title"), pull_request.get("body"))
-        # matched_version_bumps = [
-        #     version_bump
-        #     for version_bump in version_bumps
-        #     if find_alerts_for_package(version_bump.package, alerts_by_package)
-        # ]
-        # if not matched_version_bumps:
-        #     continue
-
-        # matched_alerts = [
-        #     alert
-        #     for version_bump in matched_version_bumps
-        #     for alert in find_alerts_for_package(version_bump.package, alerts_by_package)
-        # ]
-        # if not any(alert.get("severity") in severity_filter for alert in matched_alerts):
-        #     continue
+        
 
         candidates.append(
             PullRequestMetadata.from_pull_request(

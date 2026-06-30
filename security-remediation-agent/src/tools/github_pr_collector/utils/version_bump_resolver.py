@@ -51,15 +51,30 @@ def extract_from_title(title: str) -> list[VersionUpdate]:
 
     return results
 
+def _clean_version(version: str) -> str:
+    """
+    Strip semver range-operator prefixes (^, ~, >=, <=, >, <, =) and
+    surrounding whitespace from a version string.
+ 
+    Renovate table cells often render the *range* rather than the bare
+    version, e.g. "^0.31.0" or "~> 1.2.3". Without stripping this, the
+    extracted to_version/from_version will never exactly equal a bare
+    version string computed elsewhere (e.g. "0.31.0" from an advisory's
+    first_patched field), causing downstream exact-match comparisons to
+    silently fail even though the versions are equivalent.
+    """
+    return version.lstrip("^~>=< ").strip()
 
 def extract_from_body(body: str) -> list[VersionUpdate]:
     """Pull all package updates out of the PR body."""
     body = body or ""
-
+ 
     results = []
     seen = set()
-
+ 
     def add(pkg, old, new, source):
+        old = _clean_version(old)
+        new = _clean_version(new)
         key = (pkg, old, new)
         if pkg and key not in seen:
             seen.add(key)
@@ -71,7 +86,7 @@ def extract_from_body(body: str) -> list[VersionUpdate]:
                     source=source,
                 )
             )
-
+ 
     # Dependabot
     pattern = (
         r"(?:Bumps?|Updates?)\s+"
@@ -80,7 +95,7 @@ def extract_from_body(body: str) -> list[VersionUpdate]:
         r"from\s+`?([0-9A-Za-z._+-]+)`?\s+"
         r"to\s+`?([0-9A-Za-z._+-]+)`?"
     )
-
+ 
     for m in re.finditer(pattern, body, re.IGNORECASE):
         add(
             m.group(1),
@@ -88,22 +103,22 @@ def extract_from_body(body: str) -> list[VersionUpdate]:
             m.group(3),
             "body:dependabot",
         )
-
+ 
     # Renovate markdown table
     for line in body.splitlines():
         if "->" not in line or "|" not in line:
             continue
-
+ 
         pkg_match = re.match(
             r"\s*\|\s*\[?`?([\w@/.\-]+)`?\]?(?:\([^)]*\))?\s*\|",
             line,
         )
-
+ 
         ver_match = re.search(
             r"`([^`]+)`\s*->\s*`([^`]+)`",
             line,
         )
-
+ 
         if pkg_match and ver_match:
             add(
                 pkg_match.group(1),
@@ -111,7 +126,7 @@ def extract_from_body(body: str) -> list[VersionUpdate]:
                 ver_match.group(2),
                 "body:renovate-table",
             )
-
+ 
     # Generic fallback
     if not results:
         for m in re.finditer(
@@ -125,7 +140,7 @@ def extract_from_body(body: str) -> list[VersionUpdate]:
                 m.group(3),
                 "body:generic",
             )
-
+ 
     return results
 
 
