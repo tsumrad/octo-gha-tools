@@ -352,6 +352,7 @@ def find_source_pull_metadata(
         pkg.non_breaking_upgrade_version
         or pkg.breaking_upgrade_version
         or pkg.upgrade_version
+        or pkg.remediated_version
         or None
     )
 
@@ -422,6 +423,24 @@ def build_transitive_placeholder_markdown(
 **Breaking change:** No
 **GHSAs:** {", ".join(ghsas)}
 {undershoot_note}
+### Issue details
+
+| Field | Value |
+|---|---|
+| Vulnerable package | `{pkg.package}` |
+| Ecosystem | `{pkg.ecosystem}` |
+| Vulnerable range | `{pkg.current_version_range}` |
+| Patched vulnerable package version | `{pkg.remediated_version or "unknown"}` |
+| Relationship | `transitive` |
+
+### Source details
+
+| Field | Value |
+|---|---|
+| Source package to update | `{source_package}` |
+| Required source version | `>= {source_required_version}` |
+| Source candidates from dependency graph | {sources_str} |
+
 ### Transitive vulnerability chain
 
 | Field | Value |
