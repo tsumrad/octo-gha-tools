@@ -1,3 +1,6 @@
+import sys
+import types
+
 from src.models.remediation_plan import ActionType, FixClass
 from src.models.security_package_triage import SecurityPackageTriage
 from src.tools.github_vulnerability_collector.model.vulnerability_alert import VulnerabilityAlert
@@ -69,3 +72,35 @@ def test_critical_transitive_fix_direction_without_pr_creates_placeholder_plan()
     assert "### Source details" in plan.action.placeholder_markdown
     assert "| Source package to update | `axios` |" in plan.action.placeholder_markdown
     assert "| Source candidates from dependency graph | axios@0.28.1 |" in plan.action.placeholder_markdown
+
+
+def test_transitive_triage_preserves_patched_vulnerable_package_version() -> None:
+    sys.modules.setdefault(
+        "src.tools.github_sbom_analyzer.sbom_analysis_tool",
+        types.SimpleNamespace(sbom_analysis_tool=types.SimpleNamespace(ainvoke=None)),
+    )
+    from src.agents.vulnerability_triage_agent import vulnerabilityTriageAgent
+
+    pkg = SecurityPackageTriage(
+        package="form-data",
+        ecosystem="npm",
+        current_version_range=">= 4.0.0, < 4.0.6",
+        remediated_version="",
+        istransitive=True,
+        vulnerabilities=[
+            VulnerabilityAlert(
+                package="form-data",
+                ecosystem="npm",
+                severity="critical",
+                ghsa_id="GHSA-form-data",
+                first_patched="4.0.6",
+                vulnerable_range=">= 4.0.0, < 4.0.6",
+                relationship="indirect",
+            )
+        ],
+    )
+
+    vulnerabilityTriageAgent().apply_triage_recommendation(pkg)
+
+    assert pkg.remediated_version == "4.0.6"
+    assert pkg.upgrade_version == ""
