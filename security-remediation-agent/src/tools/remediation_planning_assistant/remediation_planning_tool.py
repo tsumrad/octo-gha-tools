@@ -388,6 +388,37 @@ def find_undershooting_pr(
     return None, ""
 
 
+# ── AC line builder ───────────────────────────────────────────────────────────
+
+def build_ac_line(
+    *,
+    target_package: str,
+    current_version_range: str,
+    target_version: str | None,
+    breaking: bool,
+    relationship: str,            # "direct" | "transitive"
+    ghsas: list[str],
+    via: str | None = None,       # vulnerable child package, for transitive AC lines
+    pr_ref: str | None = None,    # e.g. "existing PR #123 insufficient (reaches `1.2.0`)"
+) -> str:
+    """
+    Produce one terse, parseable acceptance-criteria line summarizing exactly
+    what needs to change. Designed to double as an LLM coding-agent prompt:
+    package, current→target version, breaking flag, direct/transitive +
+    chain, and every CVE/GHSA the bump closes — all on one line.
+    """
+    change_tag = "BREAKING" if breaking else "non-breaking"
+    rel_tag = f"transitive fix for `{via}`" if relationship == "transitive" and via else "direct"
+    ghsa_str = ", ".join(ghsas) if ghsas else "none"
+    target_str = target_version or "no known fix"
+    pr_str = f"; {pr_ref}" if pr_ref else ""
+
+    return (
+        f"Bump `{target_package}` `{current_version_range}` → `{target_str}` "
+        f"[{change_tag}, {rel_tag}] — closes {ghsa_str}{pr_str}"
+    )
+
+
 # ── Content builders ──────────────────────────────────────────────────────────
 
 def build_transitive_placeholder_markdown(
@@ -403,52 +434,46 @@ def build_transitive_placeholder_markdown(
     the source package has a known fix version, and include full transitive
     chain context — child package, affected version range, GHSAs, and a note
     about any existing PR that falls short.
+
+    The body now leads with a single crisp `- [ ] **AC:**` line (built via
+    build_ac_line()) that captures the full fix spec — package, current→target
+    version, breaking flag, transitive chain, and every closed GHSA/CVE — in
+    one line. This line is what the workflow's severity-level placeholder PR
+    extracts directly, and it's terse enough to use as an LLM coding-agent
+    prompt on its own. The table below it is kept only as supplementary
+    human-readable context.
     """
     sources_str = ", ".join(pkg.transitive_source_package)
 
-    undershoot_note = ""
+    pr_ref = None
     if undershooting_pr:
         _, to_ver = find_undershooting_pr(pkg, source_package)
-        undershoot_note = (
-            f"\n> ⚠️ **Existing PR #{undershooting_pr.pr_number} is insufficient** — "
-            f"it bumps `{source_package}` to `{to_ver}`, which does not reach the "
-            f"required `{source_required_version}`. "
-            f"[View PR]({undershooting_pr.pull_url})\n"
-        )
+        pr_ref = f"existing PR #{undershooting_pr.pr_number} insufficient (reaches `{to_ver}`)"
 
-    return f"""## Security remediation — {source_package} ({pkg.ecosystem}) [transitive]
+    ac_line = build_ac_line(
+        target_package=source_package,
+        current_version_range=pkg.current_version_range,
+        target_version=source_required_version,
+        breaking=False,
+        relationship="transitive",
+        via=pkg.package,
+        ghsas=ghsas,
+        pr_ref=pr_ref,
+    )
 
-**Severity:** {severity.upper()}
-**Action required:** Bump `{source_package}` to `>= {source_required_version}`
-**Breaking change:** No
-**GHSAs:** {", ".join(ghsas)}
-{undershoot_note}
-### Issue details
+    return f"""## {severity.upper()} — `{pkg.package}` ({pkg.ecosystem}) [transitive via `{source_package}`]
+
+- [ ] **AC:** {ac_line}
 
 | Field | Value |
 |---|---|
 | Vulnerable package | `{pkg.package}` |
 | Ecosystem | `{pkg.ecosystem}` |
 | Vulnerable range | `{pkg.current_version_range}` |
-| Patched vulnerable package version | `{pkg.remediated_version or "unknown"}` |
 | Relationship | `transitive` |
-
-### Source details
-
-| Field | Value |
-|---|---|
-| Source package to update | `{source_package}` |
-| Required source version | `>= {source_required_version}` |
-| Source candidates from dependency graph | {sources_str} |
-
-### Transitive vulnerability chain
-
-| Field | Value |
-|---|---|
-| Vulnerable package | `{pkg.package}` |
-| Vulnerable range | `{pkg.current_version_range}` |
 | Pulled in via | {sources_str} |
-| Fix: upgrade source to | `{source_package} >= {source_required_version}` |
+| Source to bump | `{source_package}` → `>= {source_required_version}` |
+| GHSAs | {", ".join(ghsas) if ghsas else "—"} |
 
 ### Vulnerability summary
 {build_vuln_summary_lines(pkg.vulnerabilities)}
@@ -582,6 +607,13 @@ def build_placeholder_markdown(
     severity: str,
     ghsas: list[str],
 ) -> str:
+    """
+    Leads with a single crisp `- [ ] **AC:**` line (built via build_ac_line())
+    capturing package, current→target version, breaking flag, and every
+    closed GHSA/CVE in one line — terse enough to feed directly to an LLM
+    coding agent as the fix spec. The table below is kept only as
+    supplementary human-readable context.
+    """
     breaking = fix_class in (FixClass.BREAKING_BUMP, FixClass.PARTIAL_FIX_AVAILABLE)
     target = (
         pkg.breaking_upgrade_version
@@ -590,13 +622,27 @@ def build_placeholder_markdown(
         or pkg.remediated_version
     )
 
-    return f"""## Security remediation — {pkg.package} ({pkg.ecosystem})
+    ac_line = build_ac_line(
+        target_package=pkg.package,
+        current_version_range=pkg.current_version_range,
+        target_version=target,
+        breaking=breaking,
+        relationship="direct",
+        ghsas=ghsas,
+    )
 
-**Severity:** {severity.upper()}
-**Current range:** {pkg.current_version_range}
-**Target version:** {target}
-**Breaking change:** {"Yes" if breaking else "No"}
-**GHSAs:** {", ".join(ghsas)}
+    return f"""## {severity.upper()} — `{pkg.package}` ({pkg.ecosystem})
+
+- [ ] **AC:** {ac_line}
+
+| Field | Value |
+|---|---|
+| Ecosystem | `{pkg.ecosystem}` |
+| Current range | `{pkg.current_version_range}` |
+| Target version | `{target or "—"}` |
+| Relationship | direct |
+| Breaking change | {"Yes" if breaking else "No"} |
+| GHSAs | {", ".join(ghsas) if ghsas else "—"} |
 
 ### Vulnerability summary
 {build_vuln_summary_lines(pkg.vulnerabilities)}
