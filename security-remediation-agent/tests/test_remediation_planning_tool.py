@@ -79,7 +79,7 @@ def test_transitive_triage_preserves_patched_vulnerable_package_version() -> Non
         "src.tools.github_sbom_analyzer.sbom_analysis_tool",
         types.SimpleNamespace(sbom_analysis_tool=types.SimpleNamespace(ainvoke=None)),
     )
-    from src.agents.vulnerability_triage_agent import vulnerabilityTriageAgent
+    from src.agents.vulnerability_triage_agent import VulnerabilityTriageAgent
 
     pkg = SecurityPackageTriage(
         package="form-data",
@@ -100,7 +100,7 @@ def test_transitive_triage_preserves_patched_vulnerable_package_version() -> Non
         ],
     )
 
-    vulnerabilityTriageAgent().apply_triage_recommendation(pkg)
+    VulnerabilityTriageAgent().apply_triage_recommendation(pkg)
 
     assert pkg.remediated_version == "4.0.6"
     assert pkg.upgrade_version == ""
