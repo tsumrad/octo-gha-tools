@@ -9,7 +9,6 @@ from .github_codescanning_collector.codescanning_alerts_tool import get_codescan
 from .github_pr_collector.pull_requests_tool import get_open_pull_requests
 from .github_pr_collector.model.pull_request_metadata import (
     filter_security_dependency_pull_requests,
-    highest_severity,
 )
 from .github_vulnerability_collector.dependabot_alerts_tool import (
     DEFAULT_SEVERITIES,
@@ -20,6 +19,7 @@ from .github_vulnerability_collector.model.vulnerability_alert import build_aler
 
 SEVERITIES = ("critical", "high", "medium", "low")
 IMPACTS = ("non-breaking", "breaking")
+SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 
 
 def parse_severities(value: str) -> set[str]:
@@ -33,6 +33,54 @@ def parse_severities(value: str) -> set[str]:
         )
 
     return severities or set(DEFAULT_SEVERITIES)
+
+
+def highest_severity(package_alerts: list[dict[str, Any]]) -> str:
+    return max(
+        (
+            ((alert.get("security_advisory") or {}).get("severity") or "").lower()
+            for alert in package_alerts
+        ),
+        key=lambda severity: SEVERITY_ORDER.get(severity, 0),
+        default="",
+    )
+
+
+def patched_versions(package_alerts: list[dict[str, Any]]) -> list[str]:
+    versions: list[str] = []
+    seen: set[str] = set()
+    for alert in package_alerts:
+        vulnerability = alert.get("security_vulnerability") or {}
+        first_patched = vulnerability.get("first_patched_version") or {}
+        version = first_patched.get("identifier", "")
+        if version and version not in seen:
+            seen.add(version)
+            versions.append(version)
+    return versions
+
+
+def placeholder_markdown(package: str, severity: str, package_alerts: list[dict[str, Any]]) -> str:
+    versions = patched_versions(package_alerts)
+    target = ", ".join(versions) if versions else "unknown"
+    summaries = []
+    for alert in package_alerts:
+        advisory = alert.get("security_advisory") or {}
+        ghsa = advisory.get("ghsa_id", "")
+        summary = advisory.get("summary", "")
+        summaries.append(f"- **{ghsa}** {summary}".rstrip())
+
+    return f"""## Security remediation — {package}
+
+**Severity:** {severity.upper()}
+**Target version:** {target}
+
+### Vulnerability summary
+{chr(10).join(summaries)}
+
+### Resolution options
+- [ ] Assign to coding agent (Copilot / LLM) to author the fix PR
+- [ ] Self-resolve — implement migration manually
+"""
 
 
 async def build_rollup_plan(
@@ -49,6 +97,8 @@ async def build_rollup_plan(
         get_open_pull_requests(owner, repo),
     )
     candidate_pull_requests = filter_security_dependency_pull_requests(
+        owner=owner,
+        repo=repo,
         pull_requests=open_pull_requests,
         alerts=dependabot_alerts,
         severities=severities,
@@ -67,8 +117,21 @@ async def build_rollup_plan(
 
         severity = highest_severity(package_alerts)
         if severity and severity in severities:
+            versions = patched_versions(package_alerts)
+            action_type = "placeholder_pr" if versions else "open_issue"
             findings_without_pr.append(
-                {"package": package, "severity": severity, "alerts": package_alerts}
+                {
+                    "package": package,
+                    "severity": severity,
+                    "action_type": action_type,
+                    "patched_versions": versions,
+                    "placeholder_markdown": (
+                        placeholder_markdown(package, severity, package_alerts)
+                        if action_type == "placeholder_pr"
+                        else ""
+                    ),
+                    "alerts": package_alerts,
+                }
             )
 
     return {
