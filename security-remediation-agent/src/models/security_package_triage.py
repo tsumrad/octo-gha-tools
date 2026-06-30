@@ -38,3 +38,14 @@ class SecurityPackageTriage:
 
     ecosystem: str = ""
     severity: str = ""
+
+    @property
+    def relationship(self) -> str:
+        """Derived from ``istransitive`` so serialization is always consistent.
+
+        Downstream code (e.g. the remediation planner) serializes this property
+        into ``package.relationship`` in the orchestrator output.  Keeping it as
+        a computed property means it can never drift out of sync with the
+        underlying ``istransitive`` flag.
+        """
+        return "transitive" if self.istransitive else "direct"
