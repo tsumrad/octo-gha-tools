@@ -478,7 +478,14 @@ def build_missing_source_issue_title(pkg: SecurityPackageTriage, severity: str) 
 # ── Fix classification helpers ────────────────────────────────────────────────
 
 def derive_fix_class(pkg: SecurityPackageTriage) -> FixClass:
-    if not pkg.isupgradable:
+    has_fix_direction = bool(
+        pkg.non_breaking_upgrade_version
+        or pkg.breaking_upgrade_version
+        or pkg.upgrade_version
+        or pkg.remediated_version
+    )
+
+    if not pkg.isupgradable and not has_fix_direction:
         return FixClass.NO_FIX_AVAILABLE
 
     has_non_breaking = bool(pkg.non_breaking_upgrade_version)
@@ -489,6 +496,9 @@ def derive_fix_class(pkg: SecurityPackageTriage) -> FixClass:
     if has_breaking and not has_non_breaking:
         return FixClass.BREAKING_BUMP
     if has_non_breaking and not has_breaking:
+        return FixClass.NON_BREAKING_BUMP
+
+    if has_fix_direction:
         return FixClass.NON_BREAKING_BUMP
 
     return FixClass.NO_FIX_AVAILABLE
@@ -554,7 +564,12 @@ def build_placeholder_markdown(
     ghsas: list[str],
 ) -> str:
     breaking = fix_class in (FixClass.BREAKING_BUMP, FixClass.PARTIAL_FIX_AVAILABLE)
-    target = pkg.breaking_upgrade_version or pkg.non_breaking_upgrade_version
+    target = (
+        pkg.breaking_upgrade_version
+        or pkg.non_breaking_upgrade_version
+        or pkg.upgrade_version
+        or pkg.remediated_version
+    )
 
     return f"""## Security remediation — {pkg.package} ({pkg.ecosystem})
 
