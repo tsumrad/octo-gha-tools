@@ -38,7 +38,11 @@ def parse_severities(value: str) -> set[str]:
 def highest_severity(package_alerts: list[dict[str, Any]]) -> str:
     return max(
         (
-            ((alert.get("security_advisory") or {}).get("severity") or "").lower()
+            (
+                alert.get("severity")
+                or (alert.get("security_advisory") or {}).get("severity")
+                or ""
+            ).lower()
             for alert in package_alerts
         ),
         key=lambda severity: SEVERITY_ORDER.get(severity, 0),
@@ -52,7 +56,7 @@ def patched_versions(package_alerts: list[dict[str, Any]]) -> list[str]:
     for alert in package_alerts:
         vulnerability = alert.get("security_vulnerability") or {}
         first_patched = vulnerability.get("first_patched_version") or {}
-        version = first_patched.get("identifier", "")
+        version = alert.get("first_patched") or first_patched.get("identifier", "")
         if version and version not in seen:
             seen.add(version)
             versions.append(version)
@@ -65,8 +69,8 @@ def placeholder_markdown(package: str, severity: str, package_alerts: list[dict[
     summaries = []
     for alert in package_alerts:
         advisory = alert.get("security_advisory") or {}
-        ghsa = advisory.get("ghsa_id", "")
-        summary = advisory.get("summary", "")
+        ghsa = alert.get("ghsa_id") or advisory.get("ghsa_id", "")
+        summary = alert.get("summary") or advisory.get("summary", "")
         summaries.append(f"- **{ghsa}** {summary}".rstrip())
 
     return f"""## Security remediation — {package}
@@ -107,8 +111,11 @@ async def build_rollup_plan(
     plan = {f"{severity}-{impact}": [] for severity in SEVERITIES for impact in IMPACTS}
     matched_packages: set[str] = set()
     for item in candidate_pull_requests:
+        package = item.get("package")
+        if not item.get("severity") or not item.get("impact") or not package:
+            continue
         plan[f"{item['severity']}-{item['impact']}"].append(item)
-        matched_packages.add(item["package"].lower())
+        matched_packages.add(package.lower())
 
     findings_without_pr = []
     for package, package_alerts in build_alerts_by_package(dependabot_alerts).items():

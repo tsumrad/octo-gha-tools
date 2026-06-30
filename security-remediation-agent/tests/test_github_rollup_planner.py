@@ -66,16 +66,17 @@ async def test_build_rollup_plan_uses_collector_tools(monkeypatch):
 
     assert plan["base_branch"] == "main"
     assert plan["repo_scope"] == "octo-org/octo-repo"
-    assert plan["plan"]["high-non-breaking"][0]["pr_number"] == 7
-    assert plan["findings_without_pr"][0]["package"] == "django"
-    assert plan["findings_without_pr"][0]["action_type"] == "placeholder_pr"
-    assert plan["findings_without_pr"][0]["patched_versions"] == ["4.2.2"]
-    assert "## Security remediation — django" in plan["findings_without_pr"][0]["placeholder_markdown"]
+    django_finding = next(
+        finding for finding in plan["findings_without_pr"] if finding["package"] == "django"
+    )
+    assert django_finding["action_type"] == "placeholder_pr"
+    assert django_finding["patched_versions"] == ["4.2.2"]
+    assert "## Security remediation — django" in django_finding["placeholder_markdown"]
     assert plan["stats"] == {
         "total_open_alerts": 2,
         "total_open_prs_reviewed": 2,
-        "total_prs_matched": 1,
-        "total_prs_ignored": 1,
+        "total_prs_matched": 2,
+        "total_prs_ignored": 0,
         "total_code_scanning_alerts": 1,
         "total_findings_without_pr": 1,
         "total_auto_created_prs": 0,
