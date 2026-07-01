@@ -65,6 +65,24 @@ def _clean_version(version: str) -> str:
     """
     return version.lstrip("^~>=< ").strip()
 
+# Dependabot grouped-update table row, e.g.:
+#   | [axios](url) | 0.28.1 | 1.18.1 |
+#   | underscore   | 1.13.6 | 1.13.8 |
+#
+# Unlike the Renovate table below, grouped Dependabot PRs (raised via a
+# `groups:` block in dependabot.yml) render a plain 3-column table with no
+# backticks and no "->" arrow between versions — each version sits in its
+# own cell instead. Without a dedicated matcher, every package in a grouped
+# PR body silently produces zero VersionUpdate entries, which empties
+# version_bumps for the whole PR and drops every one of its packages out of
+# rollup/standalone matching into placeholder, even though the PR already
+# fixes them.
+_GROUPED_TABLE_ROW = re.compile(
+    r"^\|\s*\[?`?([\w@/.\-]+)`?\]?(?:\([^)]*\))?\s*\|\s*"
+    r"([0-9][0-9A-Za-z._+-]*)\s*\|\s*"
+    r"([0-9][0-9A-Za-z._+-]*)\s*\|"
+)
+
 def extract_from_body(body: str) -> list[VersionUpdate]:
     """Pull all package updates out of the PR body."""
     body = body or ""
@@ -125,6 +143,23 @@ def extract_from_body(body: str) -> list[VersionUpdate]:
                 ver_match.group(1),
                 ver_match.group(2),
                 "body:renovate-table",
+            )
+
+    # Dependabot grouped-update table (plain 3-column, no arrow/backticks).
+    # Runs as its own pass over lines the Renovate-table loop above didn't
+    # already claim (those contain "->" and are handled there), so a single
+    # line is never double-counted between the two table matchers.
+    for line in body.splitlines():
+        if "->" in line or "|" not in line:
+            continue
+
+        m = _GROUPED_TABLE_ROW.match(line.strip())
+        if m:
+            add(
+                m.group(1),
+                m.group(2),
+                m.group(3),
+                "body:dependabot-grouped-table",
             )
  
     # Generic fallback
