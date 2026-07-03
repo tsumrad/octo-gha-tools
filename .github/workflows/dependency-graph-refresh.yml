@@ -112,7 +112,7 @@ jobs:
 
       - name: Build scan matrix
         id: matrix
-        uses: sumathi-thirumani/shared-gha-tools/.github/actions/build-ecosystem-matrix@feature/dependency-graph-refresh
+        uses: tsumrad/octo-gha-tools/.github/actions/build-ecosystem-matrix@feature/agent-remediation-v2
         with:
           # Detect ecosystem manifests, skip generated/vendor folders, and emit
           # one matrix entry for each filesystem SBOM target.
@@ -156,7 +156,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run SBOM core action
-        uses: sumathi-thirumani/shared-gha-tools/.github/actions/sbom-generation@feature/dependency-graph-refresh
+        uses: tsumrad/octo-gha-tools/.github/actions/sbom-generation@feature/agent-remediation-v2
         with:
           # Generate the CycloneDX inventory used by security/compliance tooling.
           source: ${{ matrix.source }}
@@ -207,7 +207,7 @@ jobs:
           fetch-depth: 0
 
       - name: Refresh GitHub Dependency Graph
-        uses: sumathi-thirumani/shared-gha-tools/.github/actions/refresh-dependency-graph@feature/dependency-graph-refresh
+        uses: tsumrad/octo-gha-tools/.github/actions/refresh-dependency-graph@feature/agent-remediation-v2
         with:
           scan_label: ${{ matrix.scan_label }}
           source_dir: ${{ matrix.source }}

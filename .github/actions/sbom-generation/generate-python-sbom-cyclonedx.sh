@@ -2,316 +2,179 @@
 set -euo pipefail
 
 # Usage:
-#   generate-python-sbom.sh <project_dir> <output_prefix>
-#
-# Produces:
-#   <output_prefix>.cyclonedx.json
-
+#   generate-python-sbom-cyclonedx.sh <project_dir> <output_prefix>
 
 PROJECT_DIR="${1:?project directory is required}"
 OUTPUT_PREFIX="${2:?output prefix is required}"
 
 CYCLONEDX_BOM_VERSION="${CYCLONEDX_BOM_VERSION:-7.3.0}"
 POETRY_VERSION="${POETRY_VERSION:-2.2.1}"
-PYTHON_BIN="${PYTHON_BIN:-}"
-
 
 log() {
-	echo "[python-sbom] $*"
+  echo "[python-sbom] $*"
 }
-
 
 die() {
-	echo "[python-sbom] ERROR: $*" >&2
-	exit 1
+  echo "[python-sbom] ERROR: $*" >&2
+  exit 1
 }
-
-
-resolve_python() {
-
-	if [ -n "$PYTHON_BIN" ]; then
-
-		command -v "$PYTHON_BIN" >/dev/null ||
-			die "Configured Python not found: $PYTHON_BIN"
-
-		return
-	fi
-
-
-	if command -v python3 >/dev/null; then
-		PYTHON_BIN="python3"
-
-	elif command -v python >/dev/null; then
-		PYTHON_BIN="python"
-
-	else
-		die "Python interpreter not found"
-	fi
-}
-
 
 is_poetry_project() {
-
-	[ -f "poetry.lock" ] ||
-	{
-		[ -f "pyproject.toml" ] &&
-		grep -q '^\[tool\.poetry\]' pyproject.toml
-	}
+  [ -f "poetry.lock" ] || grep -q '^\[tool\.poetry\]' pyproject.toml 2>/dev/null
 }
-
-
-requirements_file() {
-
-	find . \
-		-maxdepth 1 \
-		-type f \
-		-name 'requirements*.txt' |
-		sort |
-		head -n 1
-}
-
-
-install_tooling() {
-
-	local packages=(
-		"cyclonedx-bom==$CYCLONEDX_BOM_VERSION"
-	)
-
-
-	if is_poetry_project; then
-		packages+=(
-			"poetry==$POETRY_VERSION"
-		)
-	fi
-
-
-	log "Installing SBOM tooling"
-
-
-	"$PYTHON_BIN" -m venv "$TOOL_VENV"
-
-
-	TOOL_PYTHON="$TOOL_VENV/bin/python"
-
-
-	"$TOOL_PYTHON" -m pip install \
-		--disable-pip-version-check \
-		--quiet \
-		"${packages[@]}"
-
-
-	if is_poetry_project; then
-		TOOL_POETRY="$TOOL_VENV/bin/poetry"
-	fi
-}
-
 
 ensure_poetry_lock() {
-
-	[ -f poetry.lock ] ||
-		die "poetry.lock missing; deterministic SBOM requires lock file"
+  if [ ! -f "poetry.lock" ]; then
+    log "poetry.lock not found; generating lock file"
+    "$TOOL_POETRY" lock --no-interaction
+  fi
 }
 
+verify_sbom() {
+  local sbom_file="$1"
+  local python_bin="$2"
 
-generate_poetry_environment() {
+  [ -f "$sbom_file" ] || die "SBOM output missing: $sbom_file"
 
-	log "Creating Poetry environment from lock file"
+  local component_count
+  component_count="$("$python_bin" - "$sbom_file" <<'PY'
+import json, sys
 
+with open(sys.argv[1], encoding="utf-8") as f:
+    data = json.load(f)
 
-	PROJECT_VENV="$(mktemp -d)"
+print(len(data.get("components") or []))
+PY
+)"
 
+  if [ "$component_count" -eq 0 ]; then
+    die "SBOM contains zero components: $sbom_file"
+  fi
 
-	export POETRY_VIRTUALENVS_CREATE=true
-	export POETRY_VIRTUALENVS_PATH="$PROJECT_VENV"
-
-
-	log "Installing Poetry dependencies"
-
-
-	"$TOOL_POETRY" install \
-		--no-interaction \
-		--no-root
-
-
-	PROJECT_PYTHON="$(
-		"$TOOL_POETRY" env info --executable
-	)"
+  log "SBOM contains $component_count components"
 }
 
+verify_spdx() {
+  local sbom_file="$1"
+  local python_bin="$2"
 
-generate_requirements_environment() {
+  [ -f "$sbom_file" ] || die "SPDX output missing: $sbom_file"
 
-	local requirements="$1"
+  local package_count
+  package_count="$("$python_bin" - "$sbom_file" <<'PY'
+import json, sys
 
+with open(sys.argv[1], encoding="utf-8") as f:
+    data = json.load(f)
 
-	log "Installing requirements: ${requirements#./}"
+print(len(data.get("packages") or []))
+PY
+)"
 
+  if [ "$package_count" -eq 0 ]; then
+    die "SPDX SBOM contains zero packages: $sbom_file"
+  fi
 
-	PROJECT_VENV="$(mktemp -d)"
-
-
-	"$PYTHON_BIN" -m venv "$PROJECT_VENV"
-
-
-	PROJECT_PYTHON="$PROJECT_VENV/bin/python"
-
-
-	"$PROJECT_PYTHON" -m pip install \
-		--disable-pip-version-check \
-		--quiet \
-		--upgrade pip
-
-
-	"$PROJECT_PYTHON" -m pip install \
-		--disable-pip-version-check \
-		--quiet \
-		-r "$requirements"
+  log "SPDX SBOM contains $package_count packages"
 }
 
+site_packages_dir() {
+  local python_bin="$1"
 
-generate_cyclonedx_sbom() {
+  "$python_bin" - <<'PY'
+import site
 
-	log "Generating dependency graph CycloneDX SBOM"
-
-
-	if is_poetry_project; then
-
-		log "Detected Poetry project"
-
-		ensure_poetry_lock
-
-		generate_poetry_environment
-
-
-		log "Generating SBOM from resolved environment"
-
-
-		"$TOOL_PYTHON" -m cyclonedx_py environment \
-			"$PROJECT_PYTHON" \
-			--output-format JSON \
-			--output-file "$CYCLONEDX_OUTPUT"
-
-
-	elif [ -n "${REQUIREMENTS_FILE:-}" ]; then
-
-		log "Detected requirements project"
-
-		generate_requirements_environment \
-			"$REQUIREMENTS_FILE"
-
-
-		"$TOOL_PYTHON" -m cyclonedx_py environment \
-			"$PROJECT_PYTHON" \
-			--output-format JSON \
-			--output-file "$CYCLONEDX_OUTPUT"
-
-	else
-
-		die "No dependency graph source found"
-
-	fi
+paths = site.getsitepackages()
+print(paths[0] if paths else "")
+PY
 }
 
+[ -d "$PROJECT_DIR" ] || die "Project directory does not exist: $PROJECT_DIR"
 
-verify_cyclonedx() {
+mkdir -p "$(dirname "$OUTPUT_PREFIX")"
 
-	[ -f "$CYCLONEDX_OUTPUT" ] ||
-		die "CycloneDX output missing"
-
-
-	local components
-	local dependencies
-
-
-	components="$(
-		jq '.components | length' "$CYCLONEDX_OUTPUT"
-	)"
-
-
-	dependencies="$(
-		jq '.dependencies | length' "$CYCLONEDX_OUTPUT"
-	)"
-
-
-	[ "$components" -gt 0 ] ||
-		die "CycloneDX contains no components"
-
-
-	log "CycloneDX components: $components"
-
-	log "CycloneDX dependency graph entries: $dependencies"
-
-
-	if [ "$dependencies" -eq 0 ]; then
-
-		die "CycloneDX dependency graph missing"
-
-	fi
-}
-
-
-[ -d "$PROJECT_DIR" ] ||
-	die "Project directory does not exist: $PROJECT_DIR"
-
-
-resolve_python
-
-
-CYCLONEDX_OUTPUT="$(
-	cd "$(dirname "$OUTPUT_PREFIX")" &&
-	pwd
-)/$(basename "$OUTPUT_PREFIX").cyclonedx.json"
-
+OUTPUT_FILE="$(cd "$(dirname "$OUTPUT_PREFIX")" && pwd)/$(basename "$OUTPUT_PREFIX").cyclonedx.json"
+SPDX_FILE="$(cd "$(dirname "$OUTPUT_PREFIX")" && pwd)/$(basename "$OUTPUT_PREFIX").spdx.json"
 
 TOOL_VENV="$(mktemp -d)"
-
 PROJECT_VENV=""
 
-
 cleanup() {
-
-	rm -rf "$TOOL_VENV"
-
-
-	if [ -n "${PROJECT_VENV:-}" ]; then
-		rm -rf "$PROJECT_VENV"
-	fi
+  rm -rf "$TOOL_VENV"
+  [ -n "${PROJECT_VENV}" ] && rm -rf "$PROJECT_VENV"
 }
-
-
 trap cleanup EXIT
 
+log "Installing SBOM tooling"
+
+python -m venv "$TOOL_VENV"
+TOOL_PYTHON="$TOOL_VENV/bin/python"
+
+"$TOOL_PYTHON" -m pip install --disable-pip-version-check --quiet \
+  "cyclonedx-bom==$CYCLONEDX_BOM_VERSION" \
+  "poetry==$POETRY_VERSION"
+
+TOOL_POETRY="$TOOL_VENV/bin/poetry"
 
 pushd "$PROJECT_DIR" >/dev/null
 
+if is_poetry_project; then
+  log "Detected Poetry project"
 
-install_tooling
+  ensure_poetry_lock
 
+  PROJECT_VENV="$(mktemp -d)"
 
-REQUIREMENTS_FILE=""
+  log "Installing Poetry dependencies"
 
-if ! is_poetry_project; then
+  export POETRY_VIRTUALENVS_CREATE=true
+  export POETRY_VIRTUALENVS_PATH="$PROJECT_VENV"
+  "$TOOL_POETRY" install --no-interaction --no-root
 
-	REQUIREMENTS_FILE="$(requirements_file)"
+  PROJECT_PYTHON="$("$TOOL_POETRY" env info --executable)"
 
-fi
+  log "Generating SBOM from installed Poetry environment"
 
+  "$TOOL_PYTHON" -m cyclonedx_py environment \
+    "$PROJECT_PYTHON" \
+    --output-format JSON \
+    --output-file "$OUTPUT_FILE"
 
-if is_poetry_project || [ -n "$REQUIREMENTS_FILE" ]; then
+elif [ -f "requirements.txt" ]; then
+  log "Detected requirements.txt project"
 
-	generate_cyclonedx_sbom
+  PROJECT_VENV="$(mktemp -d)"
+  python -m venv "$PROJECT_VENV"
 
+  PROJECT_PYTHON="$PROJECT_VENV/bin/python"
+
+  log "Installing requirements"
+
+  "$PROJECT_PYTHON" -m pip install --disable-pip-version-check --quiet --upgrade pip
+  "$PROJECT_PYTHON" -m pip install --disable-pip-version-check --quiet -r requirements.txt
+
+  log "Generating SBOM from installed environment"
+
+  "$TOOL_PYTHON" -m cyclonedx_py environment \
+    "$PROJECT_PYTHON" \
+    --output-format JSON \
+    --output-file "$OUTPUT_FILE"
 else
-
-	die "No supported dependency manifest found"
-
+  die "No supported dependency manifest found (poetry.lock, pyproject.toml, or requirements.txt)"
 fi
 
+log "Generating SPDX SBOM for dependency graph submission"
+
+SITE_PACKAGES="$(site_packages_dir "$PROJECT_PYTHON")"
+[ -n "$SITE_PACKAGES" ] || die "Could not resolve Python site-packages directory"
+[ -d "$SITE_PACKAGES" ] || die "Python site-packages directory does not exist: $SITE_PACKAGES"
+
+syft "dir:$SITE_PACKAGES" \
+  --output "spdx-json=$SPDX_FILE"
 
 popd >/dev/null
 
+verify_sbom "$OUTPUT_FILE" "$TOOL_PYTHON"
+verify_spdx "$SPDX_FILE" "$TOOL_PYTHON"
 
-verify_cyclonedx
-
-
-log "CycloneDX dependency SBOM: $CYCLONEDX_OUTPUT"
+log "SBOM written to: $OUTPUT_FILE"

@@ -33,19 +33,6 @@ runs:
 
     - name: Run Component Detection + Submit
       uses: advanced-security/component-detection-dependency-submission-action@v0.1.1
-      env:
-        PipReportDisableFastDeps: "true"
-        PipReportOverrideBehavior: Default
       with:
         filePath: ${{ steps.source.outputs.clean_dir }}
         correlator: refresh-dependency-graph-${{ inputs.scan_label }}
-        detectorArgs: >-
-          Poetry=EnableIfDefaultOff,
-          NpmLockfile3=EnableIfDefaultOff,
-          Ivy=EnableIfDefaultOff,
-          ConanLock=EnableIfDefaultOff,
-          CondaLock=EnableIfDefaultOff,
-          Dockerfile=EnableIfDefaultOff,
-          Pip=Disable,
-          Spdx22=EnableIfDefaultOff,
-          Swift=EnableIfDefaultOff
