@@ -8,7 +8,7 @@ echo '{"branches":{},"stubs":{}}' >"$RESULTS_FILE"
 git fetch origin "${BASE_BRANCH}"
 
 # Collect all unique categories from the orchestrator output
-# category = "<non-breaking|breaking>-<rollup|standalone>"
+# category = "<ecosystem>--<non-breaking|breaking>-<rollup|standalone>"
 # Only rollup_pr and standalone_pr plans have real branches to merge.
 categories="$(jq -r '
   (.groups // .) |
@@ -18,23 +18,26 @@ categories="$(jq -r '
     select(.action.action_type == "rollup_pr" or .action.action_type == "standalone_pr") |
     (if .fix.fix_class == "BREAKING_BUMP" then "breaking" else "non-breaking" end) as $imp |
     (if .action.action_type == "rollup_pr" then "rollup" else "standalone" end) as $act |
-    "\($imp)-\($act)"
+    "\((.package.ecosystem // "unknown") | @uri)--\($imp)-\($act)"
   ] | unique[]
 ' "$OUTPUT_FILE")"
 
 for category in $categories; do
-	# category format: <imp>-<act>, e.g. non-breaking-rollup
+	# category format: <ecosystem>--<imp>-<act>, e.g. npm--non-breaking-rollup
 	act="$(echo "$category" | rev | cut -d'-' -f1 | rev)"
-	imp="${category%-*}"
+	ecosystem_key="${category%%--*}"
+	impact_action="${category#*--}"
+	imp="${impact_action%-*}"
 
 	# Extract plans for this category
 	# pr_branch is not in the orchestrator output, so we resolve it via gh CLI.
-	plans_json="$(jq --arg imp "$imp" --arg act "$act" '
+	plans_json="$(jq --arg ecosystem "$ecosystem_key" --arg imp "$imp" --arg act "$act" '
     (.groups // .) |
     [
       to_entries[] |
       .value.plans[]? |
       select(
+        ((.package.ecosystem // "unknown") | @uri) == $ecosystem and
         (.action.action_type == "rollup_pr" or .action.action_type == "standalone_pr") and
         (if .fix.fix_class == "BREAKING_BUMP" then "breaking" else "non-breaking" end) == $imp and
         (if .action.action_type == "rollup_pr" then "rollup" else "standalone" end) == $act and
@@ -132,7 +135,7 @@ done
 
 echo "Branch creation complete."
 
-# Placeholder plans are split by impact and put on separate stub branches.
+# Placeholder plans are split by ecosystem and impact and put on separate stub branches.
 echo "Creating stub branches for placeholder PRs..."
 
 placeholder_plans="$(jq -r '
@@ -143,7 +146,7 @@ placeholder_plans="$(jq -r '
   [
     (if .fix.fix_class == "BREAKING_BUMP" then "breaking" else "non-breaking" end),
     .package.name,
-    .package.ecosystem,
+    ((.package.ecosystem // "unknown") | @uri),
     .plan_id,
     (.action.target_package // .package.name),
     (.fix.non_breaking_fix // .fix.breaking_fix // .fix.upgrade_version // .package.remediated_version // "")
@@ -167,13 +170,13 @@ mkdir -p /tmp/remediation-plans
 while IFS=$'\t' read -r imp pkg_name ecosystem plan_id target_pkg fix_ver; do
 	[ -z "$plan_id" ] && continue
 
-	group_key="${imp}"
+	group_key="${ecosystem}--${imp}"
 	stub_branch="security-remediation/placeholder/${group_key}"
 	content_file="/tmp/remediation-plans/${group_key}.md"
 
 	if [ "${group_plan_count[$group_key]:-0}" -eq 0 ]; then
 		{
-			echo "# ${imp} - Security Remediation Plan"
+			echo "# ${ecosystem} ${imp} - Security Remediation Plan"
 			echo
 		} >"${content_file}"
 	fi

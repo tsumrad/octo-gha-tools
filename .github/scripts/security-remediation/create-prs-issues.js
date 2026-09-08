@@ -55,7 +55,7 @@ function getActionSuffix(plan) {
 }
 
 function getCategory(plan) {
-  return `${getImpact(plan)}-${getActionSuffix(plan)}`;
+  return `${encodeURIComponent(plan.package.ecosystem || "unknown")}--${getImpact(plan)}-${getActionSuffix(plan)}`;
 }
 
 function getActionLabel(plan) {
@@ -137,16 +137,18 @@ for (const [category, branchResult] of Object.entries(results.branches)) {
   if (!branchResult.pushed) continue;
 
   const plans = categoryMap[category] || [];
-  const parts = category.split('-');
+  if (plans.length === 0) continue;
+  const ecosystem = plans[0].package.ecosystem || 'unknown';
+  const parts = category.split('--')[1].split('-');
   const act = parts[parts.length - 1];
   const imp = parts.slice(0, -1).join('-');
 
-  const prTitle = `[Security Remediation] [${ACT_LABEL[act] || act}] ${IMP_LABEL[imp] || imp} Updates`;
+  const prTitle = `[Security Remediation] [${ecosystem}] [${ACT_LABEL[act] || act}] ${IMP_LABEL[imp] || imp} Updates`;
 
   const included = plans.filter(p => branchResult.included_prs.includes(p.action.pr_number));
   const excluded = plans.filter(p => branchResult.excluded_prs.includes(p.action.pr_number));
 
-  let body = `## [${ACT_LABEL[act] || act}] ${IMP_LABEL[imp] || imp} Dependency Updates\n\n`;
+  let body = `## [${ecosystem}] [${ACT_LABEL[act] || act}] ${IMP_LABEL[imp] || imp} Dependency Updates\n\n`;
   body += `> Consolidated rollup of **${imp}** **${act}** dependency upgrades addressing open security vulnerabilities.\n\n`;
 
   if (included.length > 0) {
@@ -245,13 +247,14 @@ for (const group of Object.values(output)) {
 
 for (const [stubBranch, plans] of Object.entries(plansByStubBranch)) {
   const groupKey = stubBranch.split('/').pop();
-  const imp = groupKey;
+  const ecosystem = plans[0].package.ecosystem || 'unknown';
+  const imp = getImpact(plans[0]);
 
-  const prTitle = `[Security Remediation] [Placeholder] ${IMP_LABEL[imp] || imp} Updates`;
+  const prTitle = `[Security Remediation] [${ecosystem}] [Placeholder] ${IMP_LABEL[imp] || imp} Updates`;
 
-  let body = `# Security Remediation - (${IMP_LABEL[imp] || imp}) Placeholder PRs\n\n`;
+  let body = `# Security Remediation - ${ecosystem} (${IMP_LABEL[imp] || imp}) Placeholder PRs\n\n`;
   body += `This PR tracks **${plans.length}** ${IMP_LABEL[imp] || imp} package(s) requiring manual remediation.\n`;
-  body += `See \`remediation-plan/plan-${imp}.md\` on this branch for the full crisp fix spec - `;
+  body += `See \`remediation-plan/plan-${groupKey}.md\` on this branch for the full crisp fix spec - `;
   body += `push the actual version bumps to this branch, or assign to a coding agent.\n\n`;
 
   function extractAcLine(plan) {
@@ -294,7 +297,7 @@ for (const [stubBranch, plans] of Object.entries(plansByStubBranch)) {
     }
   }
 
-  const cat = `${imp}-placeholder`;
+  const cat = getCategory(plans[0]);
 
   try {
     const existing = await findPR(stubBranch);
@@ -383,7 +386,7 @@ for (const [issueKey, group] of issueGroups) {
   const rollupRows = [];
   for (const imp of ['non-breaking', 'breaking']) {
     for (const act of ['rollup', 'standalone', 'placeholder', 'open-issue']) {
-      const cat = `${imp}-${act}`;
+      const cat = `${encodeURIComponent(ecosystem)}--${imp}-${act}`;
       const cPlans = (categoryMap[cat] || []).filter(plan => groupPlans.has(plan));
       if (cPlans.length === 0) continue;
       const prInfo = groupPRs(cat);
@@ -432,7 +435,7 @@ for (const [issueKey, group] of issueGroups) {
 
   for (const imp of ['non-breaking', 'breaking']) {
     for (const act of ['rollup', 'standalone', 'placeholder', 'open-issue']) {
-      const cat = `${imp}-${act}`;
+      const cat = `${encodeURIComponent(ecosystem)}--${imp}-${act}`;
       const cPlans = (categoryMap[cat] || []).filter(plan => groupPlans.has(plan));
       if (cPlans.length === 0) continue;
       body += `## ${IMP_LABEL[imp]} - ${ACT_LABEL[act]} Updates\n\n`;

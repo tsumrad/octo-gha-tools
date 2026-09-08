@@ -19,11 +19,16 @@ test('tracking issues group by ecosystem, major package or minor-patch, across s
   raw.groups.high.plans[0].package.effective_severity = 'high';
   const rollupPlans = [raw.groups.medium.plans[2], raw.groups.high.plans[0]];
   rollupPlans.forEach((p, index) => { p.action = { action_type: 'rollup_pr', pr_number: index + 10 }; });
-  const branchResults = { branches: { 'non-breaking-rollup': {
-    branch: 'security-remediation/non-breaking-rollup', pushed: true,
+  const branchResults = { branches: { 'npm--non-breaking-rollup': {
+    branch: 'security-remediation/npm--non-breaking-rollup', pushed: true,
     included_prs: [10, 11], excluded_prs: [],
   } } };
   const createdPulls = [];
+  raw.groups.medium.plans[4].action = { action_type: 'rollup_pr', pr_number: 20 };
+  branchResults.branches['pip--non-breaking-rollup'] = {
+    branch: 'security-remediation/pip--non-breaking-rollup', pushed: true,
+    included_prs: [20], excluded_prs: [],
+  };
   const remediationPlan = { summary: { context: {
     total_vulnerabilities: 61, total_code_scanning_alerts: 3,
     total_reviewed_prs: 9, total_ignored_prs: 8, total_remediation_prs: 1,
@@ -57,10 +62,14 @@ test('tracking issues group by ecosystem, major package or minor-patch, across s
     name => { assert.equal(name, 'fs'); return fakeFs; }, { env: { BASE_BRANCH: 'main' } }, console,
   );
   assert.equal(updated.length, 1);
-  assert.equal(createdPulls.length, 1);
-  assert.equal(createdPulls[0].title, '[Security Remediation] [Rollup] Non-Breaking Updates');
+  assert.equal(createdPulls.length, 2);
+  assert.equal(createdPulls[0].title, '[Security Remediation] [npm] [Rollup] Non-Breaking Updates');
   assert.match(createdPulls[0].body, /#10/);
   assert.match(createdPulls[0].body, /#11/);
+  assert.doesNotMatch(createdPulls[0].body, /cryptography/);
+  assert.equal(createdPulls[1].title, '[Security Remediation] [pip] [Rollup] Non-Breaking Updates');
+  assert.match(createdPulls[1].body, /cryptography/);
+  assert.doesNotMatch(createdPulls[1].body, /postcss/);
   assert.equal(updated[0].issue_number, 42);
   assert.equal(created.length, 3);
   assert.equal(output.stats.total_issues_created, 4);
