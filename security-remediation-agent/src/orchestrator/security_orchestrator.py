@@ -37,9 +37,11 @@ class SecurityOrchestrator:
             #return OrchestrationReport.empty(repo)
 
         logger.info(
-            "Collected %d findings for %s",
+            "Collected %d findings for %s (Dependabot: %d, retained code-scanning: %d)",
             len(findings.dependabot_alerts) + len(findings.codescanning_alerts),
             repo,
+            len(findings.dependabot_alerts),
+            len(findings.codescanning_alerts),
         )
 
         # ── Step 2: Triage ─────────────────────────────────────────────────────

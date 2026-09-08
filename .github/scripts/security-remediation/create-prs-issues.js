@@ -9,7 +9,7 @@ const results = fs.existsSync('rollup-results.json')
   : { branches: {} };
 const BASE_BRANCH = process.env.BASE_BRANCH;
 
-const SEV_EMOJI = { critical: '🔴', high: '🟠', moderate: '🟡', low: '🔵' };
+const SEV_EMOJI = { critical: '🔴', high: '🟠', medium: '🟡', moderate: '🟡', low: '🔵' };
 const SEV_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', moderate: 'Medium', low: 'Low' };
 const IMP_LABEL = { 'non-breaking': 'Non-Breaking', breaking: 'Breaking' };
 const ACT_LABEL = { rollup: 'Rollup', standalone: 'Standalone', placeholder: 'Placeholder', 'open-issue': 'Open Issue' };

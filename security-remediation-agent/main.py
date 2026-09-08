@@ -85,7 +85,8 @@ async def async_main() -> None:
 
     result = await orchestrator.run(repo)
     #logging.getLogger(__name__).info("Remediation summary: %s", result.summary)
-    #print(json.dumps(to_jsonable(result), indent=2, sort_keys=True))
+    # stdout is the workflow's JSON interface, including when no packages need remediation.
+    print(json.dumps(to_jsonable(result), indent=2, sort_keys=True))
 
 
 def normalize_duplicated_invocation(argv: list[str]) -> list[str]:

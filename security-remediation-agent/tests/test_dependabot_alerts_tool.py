@@ -56,6 +56,22 @@ def test_dependabot_alert_input_normalizes_severities():
     assert alert_input.severities == ["high"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("severities, expected", [
+    (None, "critical,high,low,medium"),
+    ([" Moderate ", "MEDIUM"], "medium"),
+])
+async def test_api_severity_uses_medium_not_moderate(monkeypatch, severities, expected):
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    monkeypatch.setattr(tool_module.httpx, "AsyncClient", StubAsyncClient)
+    StubAsyncClient.requests = []
+    StubAsyncClient.pages = [[{"number": 1}]]
+    StubAsyncClient.links = [""]
+    assert await get_dependabot_alerts("owner", "repo", severities) == [{"number": 1}]
+    assert StubAsyncClient.requests[0]["params"]["severity"] == expected
+    assert DependabotAlertInput(owner="owner", repo="repo", severities=["moderate"]).severities == ["medium"]
+
+
 def test_dependabot_alert_input_rejects_invalid_severities():
     with pytest.raises(ValueError, match="Unsupported Dependabot severity values: urgent"):
         DependabotAlertInput(owner="octo-org", repo="octo-repo", severities=["urgent"])
