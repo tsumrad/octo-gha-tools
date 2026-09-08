@@ -8,6 +8,7 @@ from dataclasses import field
 
 from tools.github_pr_collector.model.pull_request_metadata import PullRequestMetadata
 from tools.github_vulnerability_collector.model.vulnerability_alert import VulnerabilityAlert
+from models.security_remediation_context import SecurityRemediationContext
 
 # ── Enums ──────────────────────────────────────────────────────────────────────
 
@@ -51,14 +52,7 @@ class IssueContext:
 
 @dataclass
 class SummaryContext:
-    total_vulnerabilities: int = 0
-    total_code_scanning_alerts: int = 0
-    total_reviewed_prs: int = 0
-    total_ignored_prs: int = 0
-    total_remediation_prs: int = 0
-    total_created_rollup_prs: int = 0
-    total_created_issues: int = 0
-
+    context: SecurityRemediationContext = None
     ecosystem_summary: list[EcosystemContext] = field(default_factory=list)
     
 

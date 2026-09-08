@@ -103,15 +103,14 @@ async def pull_requests_tool(
     """Collect dependency-security pull requests from the repo's open PR list."""
 
     pull_requests = await get_open_pull_requests(owner=owner, repo=repo)
-    logger.info("Fetched %d open pull requests", len(pull_requests))
     metadata_list: list[PullRequestMetadata] = []
     for pull_request in pull_requests:
         if not pull_request.get("number"):
             continue
 
-        user = (pull_request.get("user") or {}).get("login", "")
-        if "bot" not in user.lower():
-            continue
+        # user = (pull_request.get("user") or {}).get("login", "")
+        # if "bot" not in user.lower():
+        #     continue
 
         metadata_list.append(
             build_pull_request_metadata(

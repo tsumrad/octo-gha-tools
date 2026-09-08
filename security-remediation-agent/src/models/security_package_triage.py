@@ -1,5 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Any
+from dataclasses import field
+
+from  ..models.remediation_plan import SummaryContext
 
 from ..tools.github_pr_collector.model.pull_request_metadata import PullRequestMetadata
 from ..tools.github_vulnerability_collector.model.vulnerability_alert import VulnerabilityAlert
@@ -43,3 +46,8 @@ class SecurityPackageTriage:
     # Target upgrade version for the package
     upgrade_to_version: str = ""
     
+
+@dataclass
+class SecurityRemediationTriage:
+    summary: SummaryContext = None
+    package_triages: list[SecurityPackageTriage] = field(default_factory=list)

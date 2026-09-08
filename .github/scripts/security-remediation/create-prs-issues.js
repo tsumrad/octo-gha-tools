@@ -4,6 +4,21 @@ core.info(`Operating on caller repository: ${owner}/${repo}`);
 
 const raw = JSON.parse(fs.readFileSync('workflow-plans.json', 'utf8'));
 const output = raw.groups || raw;
+const remediationPlan = JSON.parse(fs.readFileSync('orchestrator-output.json', 'utf8'));
+const summary = remediationPlan.summary || {};
+const summaryContext = summary.context || {};
+
+function repositorySummaryMarkdown() {
+  const metrics = [
+    ['Open security alerts', 'total_vulnerabilities'],
+    ['Open code scanning alerts', 'total_code_scanning_alerts'],
+    ['Open PRs reviewed', 'total_reviewed_prs'],
+    ['PRs matched (used as remediation)', 'total_remediation_prs'],
+    ['PRs ignored (no matching finding)', 'total_ignored_prs'],
+  ];
+  return '## Repository Summary\n\n| Metric | Value |\n|---|---|\n' +
+    metrics.map(([label, key]) => `| ${label} | ${summaryContext[key] ?? 0} |`).join('\n') + '\n\n';
+}
 const results = fs.existsSync('rollup-results.json')
   ? JSON.parse(fs.readFileSync('rollup-results.json', 'utf8'))
   : { branches: {} };
@@ -359,12 +374,11 @@ for (const [issueKey, group] of issueGroups) {
   body += `**Base Branch**: \`${BASE_BRANCH}\`\n`;
   body += `**Workflow Run**: [#${context.runId}](${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId})\n\n`;
 
-  body += `## Summary\n\n| Category | Count | Dependencies |\n|---|---|---|\n`;
+  body += repositorySummaryMarkdown();
+  body += `## Issue Group Summary\n\n| Category | Count | Dependencies |\n|---|---|---|\n`;
   body += `| Total security alerts | ${totalAlerts} | ${allDepsStr} |\n`;
   body += `| Direct dependencies affected | ${directPlans.length} | ${directDepsStr} |\n`;
   body += `| Transitive dependencies affected | ${transitivePs.length} | ${transitiveDepsStr} |\n`;
-  body += `| Non-breaking updates | ${nbPlans.length} | ${nbDepsStr} |\n`;
-  body += `| Breaking updates | ${bPlans.length} | ${bDepsStr} |\n\n`;
 
   const rollupRows = [];
   for (const imp of ['non-breaking', 'breaking']) {
@@ -547,7 +561,9 @@ for (const [issueKey, group] of issueGroups) {
 
 const totalPlans = Object.values(output).reduce((n, g) => n + (g.plans || []).length, 0);
 fs.writeFileSync('rollup-output.json', JSON.stringify({
+  summary,
   stats: {
+    ...summaryContext,
     total_plans: totalPlans,
     total_rollup_prs_created: Object.keys(createdPRs).length,
     total_issues_created: Object.keys(createdIssues).length,

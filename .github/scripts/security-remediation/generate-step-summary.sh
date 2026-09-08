@@ -13,13 +13,17 @@ fi
 
 base_branch="${BASE_BRANCH}"
 # SummaryContext contains repository-wide totals, before severity filtering.
-open_security_alerts="$(jq '.summary.total_vulnerabilities // 0' orchestrator-output.json)"
-open_code_scanning_alerts="$(jq '.summary.total_code_scanning_alerts // 0' orchestrator-output.json)"
-open_prs_reviewed="$(jq '.summary.total_reviewed_prs // 0' orchestrator-output.json)"
-prs_matched="$(jq '.summary.total_remediation_prs // 0' orchestrator-output.json)"
-prs_ignored="$(jq '.summary.total_ignored_prs // 0' orchestrator-output.json)"
-auto_created_prs="$(jq '.summary.total_created_rollup_prs // 0' orchestrator-output.json)"
-auto_created_issues="$(jq '.summary.total_created_issues // 0' orchestrator-output.json)"
+open_security_alerts="$(jq '.summary.context.total_vulnerabilities // 0' orchestrator-output.json)"
+open_code_scanning_alerts="$(jq '.summary.context.total_code_scanning_alerts // 0' orchestrator-output.json)"
+open_prs_reviewed="$(jq '.summary.context.total_reviewed_prs // 0' orchestrator-output.json)"
+prs_matched="$(jq '.summary.context.total_remediation_prs // 0' orchestrator-output.json)"
+prs_ignored="$(jq '.summary.context.total_ignored_prs // 0' orchestrator-output.json)"
+auto_created_prs=0
+auto_created_issues=0
+if [ -f rollup-output.json ]; then
+	auto_created_prs="$(jq '.stats.total_rollup_prs_created // 0' rollup-output.json)"
+	auto_created_issues="$(jq '.stats.total_issues_created // 0' rollup-output.json)"
+fi
 
 {
 	echo "| Metric | Value |"

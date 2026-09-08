@@ -41,61 +41,9 @@ def build_remediation_plan(
         plan_id=f"plan_{date.today():%Y%m%d}_{uuid4().hex[:8]}",
         created_at=datetime.utcnow(),
         remediation_plans=create_issue_context(triage_result),
-        summary=build_summary(triage_result),
+        #summary=build_summary(triage_result),
     )
 
-def build_summary(
-    triage_result: list[SecurityPackageTriage],
-) -> SummaryContext:
-    """
-    Group vulnerable packages by ecosystem.
-
-    A package can be:
-    - direct OR transitive
-    - breaking OR non-breaking
-
-    Multiple packages belonging to the same ecosystem are consolidated
-    into a single EcosystemContext.
-    """
-
-    grouped: dict[str, EcosystemContext] = {}
-    total_vulnerabilities: int = 0
-    total_code_scanning_alerts: int = 0
-    total_reviewed_prs: int = 0
-    total_ignored_prs: int = 0
-    total_remediation_prs: int = 0
-    total_created_rollup_prs: int = 0
-    total_created_issues: int = 0    
-    
-    for pkg in triage_result:
-        ecosystem = grouped.setdefault(
-            pkg.ecosystem,
-            EcosystemContext(
-                name=pkg.ecosystem,
-            ),
-        )
-        total_vulnerabilities += len(pkg.vulnerabilities)
-        total_reviewed_prs += len(pkg.pull_request_metadata)
-        total_remediation_prs += len(pkg.pull_request_metadata)
-
-        # Direct / transitive classification
-        if pkg.istransitive:
-            if pkg.package not in ecosystem.transitive_vulnerabile_packages:
-                ecosystem.transitive_vulnerabile_packages.append(pkg.package)
-        else:
-            if pkg.package not in ecosystem.direct_vulnerabile_packages:
-                ecosystem.direct_vulnerabile_packages.append(pkg.package)
-
-    return SummaryContext(
-        total_vulnerabilities=total_vulnerabilities,
-        total_code_scanning_alerts=total_code_scanning_alerts,
-        total_reviewed_prs=total_reviewed_prs,
-        total_ignored_prs=total_ignored_prs,
-        total_remediation_prs=total_remediation_prs,
-        total_created_rollup_prs=total_created_rollup_prs,
-        total_created_issues=total_created_issues,
-        ecosystem_summary=list(grouped.values()),
-    )
 
 def create_package_context(pkg: SecurityPackageTriage) -> PackageContext:
     return PackageContext(

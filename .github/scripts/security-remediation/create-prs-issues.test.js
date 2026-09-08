@@ -24,6 +24,10 @@ test('tracking issues group by ecosystem, major package or minor-patch, across s
     included_prs: [10, 11], excluded_prs: [],
   } } };
   const createdPulls = [];
+  const remediationPlan = { summary: { context: {
+    total_vulnerabilities: 61, total_code_scanning_alerts: 3,
+    total_reviewed_prs: 9, total_ignored_prs: 8, total_remediation_prs: 1,
+  }, ecosystem_summary: [] } };
   const created = [];
   const updated = [];
   let output;
@@ -43,7 +47,8 @@ test('tracking issues group by ecosystem, major package or minor-patch, across s
     },
   } };
   const fakeFs = {
-    readFileSync: file => JSON.stringify(file === 'rollup-results.json' ? branchResults : raw), existsSync: () => true,
+    readFileSync: file => JSON.stringify(file === 'rollup-results.json' ? branchResults
+      : file === 'orchestrator-output.json' ? remediationPlan : raw), existsSync: () => true,
     writeFileSync: (file, data) => { output = JSON.parse(data); },
   };
   await new AsyncFunction('github', 'context', 'core', 'require', 'process', 'console', source)(
@@ -62,6 +67,10 @@ test('tracking issues group by ecosystem, major package or minor-patch, across s
   assert.equal(Object.keys(output.created_issues).length, 4);
   const minor = created.find(i => i.title === '[Security Remediation] [npm] [Minor-Patch] Vulnerability Remediation Tracking');
   assert.ok(minor);
+  assert.match(minor.body, /Open security alerts \| 61/);
+  assert.match(minor.body, /Open code scanning alerts \| 3/);
+  assert.deepEqual(output.summary, remediationPlan.summary);
+  assert.equal(output.stats.total_reviewed_prs, 9);
   assert.match(minor.body, /`postcss`/);
   assert.match(minor.body, /`nanoid`/);
   assert.doesNotMatch(minor.body, /axios|vite|cryptography/);

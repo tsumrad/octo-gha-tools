@@ -64,8 +64,8 @@ def build_pull_request_metadata(
 
     user = pull_request.get("user") or {}
 
-    if not is_bot_owner(user.get("login", "")):
-        return None
+    # if not is_bot_owner(user.get("login", "")):
+    #     return None
 
     if not pull_request.get("number"):
         return None
