@@ -1,7 +1,7 @@
 import pytest
 
-from src.tools.github_codescanning_collector import codescanning_alerts_tool as tool_module
-from src.tools.github_codescanning_collector.codescanning_alerts_tool import (
+from src.tools.github_vulnerability_collector import codescanning_alerts_tool as tool_module
+from src.tools.github_vulnerability_collector.codescanning_alerts_tool import (
     codescanning_alerts_tool,
     filter_codescanning_alerts,
     get_codescanning_alerts,

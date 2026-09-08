@@ -69,6 +69,82 @@ def test_parse_version_bump(title, expected):
     assert get_version_bumps(title, "")[0].model_dump() == expected
 
 
+def test_parse_renovate_body_table_version_bump():
+    body = """
+This PR contains the following updates:
+
+| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |
+|---|---|---|---|
+| [typescript](https://www.typescriptlang.org/) ([source](https://redirect.github.com/microsoft/TypeScript)) | [`4.3.5` → `4.9.5`](https://renovatebot.com/diffs/npm/typescript/4.3.5/4.9.5) | ![age](https://developer.mend.io/api/mc/badges/age/npm/typescript/4.9.5?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/npm/typescript/4.3.5/4.9.5?slim=true) |
+
+---
+
+###
+"""
+
+    assert get_version_bumps("chore(deps): update dependency typescript to v4.9.5", body) == [
+        {
+            "package": "typescript",
+            "from_version": "4.3.5",
+            "to_version": "4.9.5",
+        }
+    ]
+
+
+def test_parse_renovate_body_table_handles_multiple_entries():
+    body = """
+This PR contains the following updates:
+
+| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |
+|---|---|---|---|
+| [@typescript-eslint/eslint-plugin](https://typescript-eslint.io/packages/eslint-plugin) ([source](https://redirect.github.com/typescript-eslint/typescript-eslint/tree/HEAD/packages/eslint-plugin)) | [`^2.30.0` → `^8.0.0`](https://renovatebot.com/diffs/npm/@typescript-eslint%2feslint-plugin/2.34.0/8.68.0) | ![age](https://developer.mend.io/api/mc/badges/age/npm/@typescript-eslint%2feslint-plugin/8.68.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/npm/@typescript-eslint%2feslint-plugin/2.34.0/8.68.0?slim=true) |
+| [eslint](https://eslint.org) ([source](https://redirect.github.com/eslint/eslint)) | [`^6.8.0` → `^10.0.0`](https://renovatebot.com/diffs/npm/eslint/6.8.0/10.9.1) | ![age](https://developer.mend.io/api/mc/badges/age/npm/eslint/10.9.1?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/npm/eslint/6.8.0/10.9.1?slim=true) |
+
+---
+###
+"""
+
+    assert get_version_bumps("chore(deps): update multiple ESLint packages", body) == [
+        {
+            "package": "@typescript-eslint/eslint-plugin",
+            "from_version": "2.30.0",
+            "to_version": "8.0.0",
+        },
+        {
+            "package": "eslint",
+            "from_version": "6.8.0",
+            "to_version": "10.0.0",
+        },
+    ]
+
+
+def test_parse_renovate_body_table_handles_multiple_entries():
+    body = """
+This PR contains the following updates:
+
+| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |
+|---|---|---|---|
+| [@typescript-eslint/eslint-plugin](https://typescript-eslint.io/packages/eslint-plugin) ([source](https://redirect.github.com/typescript-eslint/typescript-eslint/tree/HEAD/packages/eslint-plugin)) | [`^2.30.0` → `^8.0.0`](https://renovatebot.com/diffs/npm/@typescript-eslint%2feslint-plugin/2.34.0/8.68.0) | ![age](https://developer.mend.io/api/mc/badges/age/npm/@typescript-eslint%2feslint-plugin/8.68.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/npm/@typescript-eslint%2feslint-plugin/2.34.0/8.68.0?slim=true) |
+| [eslint](https://eslint.org) ([source](https://redirect.github.com/eslint/eslint)) | [`^6.8.0` → `^10.0.0`](https://renovatebot.com/diffs/npm/eslint/6.8.0/10.9.1) | ![age](https://developer.mend.io/api/mc/badges/age/npm/eslint/10.9.1?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/npm/eslint/6.8.0/10.9.1?slim=true) |
+
+---
+###
+"""
+
+    assert get_version_bumps("chore(deps): update multiple ESLint packages", body) == [
+        {
+            "package": "@typescript-eslint/eslint-plugin",
+            "from_version": "2.30.0",
+            "to_version": "8.0.0",
+        },
+        {
+            "package": "eslint",
+            "from_version": "6.8.0",
+            "to_version": "10.0.0",
+        },
+    ]
+
+
 def test_pull_request_metadata_model_normalizes_pull_request():
     metadata = PullRequestMetadata.from_pull_request(
         pull_request={

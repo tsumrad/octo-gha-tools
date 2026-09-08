@@ -4,17 +4,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
+from dataclasses import field
 
-
+from tools.github_pr_collector.model.pull_request_metadata import PullRequestMetadata
+from tools.github_vulnerability_collector.model.vulnerability_alert import VulnerabilityAlert
 
 # ── Enums ──────────────────────────────────────────────────────────────────────
-
-class FixClass(str, Enum):
-    NO_FIX_AVAILABLE      = "NO_FIX_AVAILABLE"
-    NON_BREAKING_BUMP     = "NON_BREAKING_BUMP"
-    BREAKING_BUMP         = "BREAKING_BUMP"
-    PARTIAL_FIX_AVAILABLE = "PARTIAL_FIX_AVAILABLE"
-
 
 class ActionType(str, Enum):
     ROLLUP_PR      = "rollup_pr"        # non-breaking + PR exists → grouped
@@ -35,52 +30,35 @@ class CodingAgent(str, Enum):
 class PackageContext:
     name: str
     ecosystem: str
-    current_version_range: str
-    remediated_version: str
-    effective_severity: str            # highest across all vulnerabilities
-    relationship: str            # "direct" | "transitive" | "indirect" | "unknown"
-    transitive_source_package: list[str]
-    unique_ghsas: list[str]
+    current_version: str | None = None
+    relationship: str | None = None
+    vulnerabilities: list[VulnerabilityAlert] = field(default_factory=list)
+    pull_requests: list[PullRequestMetadata] = field(default_factory=list)
+    fixed_minimum_version: str = ""
+    fixed_maximum_version: str = ""
+    isbreakable: bool = False
+    upgrade_to_version: str = ""
+    action_type: ActionType | None = None
 
 
 @dataclass
-class FixPlan:
-    fix_class: FixClass
-    non_breaking_fix: str | None       # "" normalized to None
-    breaking_fix: str | None
-    upgrade_version: str
-    partial_fix_available: bool
-    patch_available: bool
+class IssueContext:        
+    ecosystem: str | None = None
+    severity: str | None = None
+    packages: list[PackageContext] = field(default_factory=list)
+    coding_agent: CodingAgent | None = None
 
 
 @dataclass
-class ActionPlan:
-    action_type: ActionType
-    pull_url: str                        # existing PR url if available
-    pr_number: int | None              # existing PR number if available
-    placeholder_markdown: str          # populated when action_type = PLACEHOLDER_PR
-    target_package: str                = ""  # package the action actually bumps —
-                                              # == package.name for direct findings,
-                                              # == the source package for transitive ones
-
+class SummaryContext:
+    ecosystem_summary: list[EcosystemContext] = field(default_factory=list)
+    
 
 @dataclass
-class PlanState:
-    assigned_agent: CodingAgent        = CodingAgent.NONE
-    agent_assigned_at: datetime | None = None
-    autofix_attempted: bool            = False
-    issue_id: str                      = ""
-    issue_url: str                     = ""
-    recheck_at: datetime | None        = None
-
-
-@dataclass
-class AuditEntry:
-    timestamp: str
-    agent: str
-    action: str
-    detail: str
-
+class EcosystemContext:
+    name: str = ""
+    direct_vulnerabile_packages: list[str] = field(default_factory=list)
+    transitive_vulnerabile_packages: list[str] = field(default_factory=list)
 
 # ── Main model ─────────────────────────────────────────────────────────────────
 
@@ -88,8 +66,5 @@ class AuditEntry:
 class RemediationPlan:
     plan_id:    str
     created_at: datetime
-    package:    PackageContext
-    fix:        FixPlan
-    action:     ActionPlan
-    state:      PlanState
-    audit:      list[AuditEntry] = field(default_factory=list)
+    summary: SummaryContext | None = None
+    remediation_plans:    list[IssueContext] = field(default_factory=list)

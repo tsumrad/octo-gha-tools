@@ -9,52 +9,37 @@ from ..tools.github_vulnerability_collector.model.vulnerability_alert import Vul
 class SecurityPackageTriage:
     #Source: Vulnerability alert
     package: str
-    current_version_range: str
+    vulnerable_version_range: str
     remediated_version: str
     ecosystem: str = ""
     severity: str = ""
+    istransitive: bool = False
 
     #Source: Vulnerability alert and code scanning
     vulnerabilities: list[VulnerabilityAlert] = field(default_factory=list)
     scanning_alerts: list[Any] = field(default_factory=list)
 
-    # sbom
-    istransitive: bool = False
+    # component relationship    
     transitive_source_package: list[str] = field(default_factory=list)
+    current_version: str = ""
+    fixed_minimum_version: str = ""
+    fixed_maximum_version: str = ""
 
-
-    #pulls - remediation by bot
+    #pulls - remediation & update consolidation
     is_pull_available: bool = False
-    pull_metadata: list[PullRequestMetadata] = field(default_factory=list)
 
     # Determined values
     #Computed; get the least applicable patch. if its breaking version. populate breaking; else non-breaking.
     # for scenarios where both breaking and non-breaking present; both are populated.
-    breaking_upgrade_version: str = ""
-    non_breaking_upgrade_version: str = ""
-    breaking_pull_available: bool = False
-    breaking_pull_metadata: PullRequestMetadata | None = None
-    non_breaking_pull_available: bool = False
-    non_breaking_pull_metadata: PullRequestMetadata | None = None
     isbreakable: bool = False
+
+    #pulls - by bot
+    pull_request_metadata: list[PullRequestMetadata] = field(default_factory=list)
 
     #issue
     is_issue_created: bool = False
     issue_metadata: dict[str, Any] = field(default_factory=dict)
 
-    #pulls - upgrades by bot
-    isupgradable: bool = False
-    upgrade_version: str = ""
-    upgrade_pull_metadata: list[PullRequestMetadata] = field(default_factory=list)
+    # Target upgrade version for the package
+    upgrade_to_version: str = ""
     
-
-    @property
-    def relationship(self) -> str:
-        """Derived from ``istransitive`` so serialization is always consistent.
-
-        Downstream code (e.g. the remediation planner) serializes this property
-        into ``package.relationship`` in the orchestrator output.  Keeping it as
-        a computed property means it can never drift out of sync with the
-        underlying ``istransitive`` flag.
-        """
-        return "transitive" if self.istransitive else "direct"

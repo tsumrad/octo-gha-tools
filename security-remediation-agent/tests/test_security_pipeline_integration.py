@@ -1,7 +1,13 @@
+import logging
 import sys
 import types
+from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import main as cli_main
 
 sys.modules.setdefault(
     "src.tools.github_sbom_analyzer.sbom_analysis_tool",
@@ -15,7 +21,7 @@ from src.agents.vulnerability_collector_agent import VulnerabilityCollectorAgent
 from src.agents.vulnerability_triage_agent import VulnerabilityTriageAgent
 from src.engines.policy_engine import package_relationship_lookup as relationship_module
 from src.models.remediation_plan import ActionType
-from src.tools.github_codescanning_collector.model.codescanning_alert import CodescanningAlert
+from src.tools.github_vulnerability_collector.model.codescanning_alert import CodescanningAlert
 from src.tools.github_pr_collector.model.pull_request_metadata import PullRequestMetadata
 from src.tools.github_pr_collector.utils.version_bump_resolver import VersionBump
 from src.tools.github_vulnerability_collector.model.vulnerability_alert import VulnerabilityAlert
@@ -35,6 +41,27 @@ async def run_pipeline(repo: dict[str, str]):
     findings = await VulnerabilityCollectorAgent().collect(repo)
     triage_result = await VulnerabilityTriageAgent().triage(repo, findings)
     return await RemediationPlannerAgent().plan(triage_result)
+
+
+@pytest.mark.asyncio
+async def test_cli_configures_logging_for_info_messages(monkeypatch):
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.WARNING)
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    monkeypatch.setattr(sys, "argv", ["main.py", "--owner", "octo-org", "--repo", "octo-repo"])
+
+    async def fake_run(self, repo):
+        logging.getLogger("src.orchestrator.security_orchestrator").info(
+            "Orchestration started for %s",
+            repo,
+        )
+        return {"status": "ok"}
+
+    monkeypatch.setattr(cli_main.SecurityOrchestrator, "run", fake_run)
+
+    await cli_main.async_main()
+
+    assert root_logger.level == logging.INFO
 
 
 @pytest.mark.asyncio

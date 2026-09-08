@@ -1,6 +1,6 @@
 import re
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class VersionBump(BaseModel):
@@ -8,100 +8,46 @@ class VersionBump(BaseModel):
     from_version: str
     to_version: str
 
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, dict):
+            return self.model_dump() == other
+        if isinstance(other, VersionBump):
+            return self.model_dump() == other.model_dump()
+        return super().__eq__(other)
 
-def extract_from_title(title: str) -> list[VersionBump]:
-    """Try to pull a single package update out of the PR title."""
-    title = title or ""
-    results = []
+    def __iter__(self):
+        yield from self.model_dump().items()
 
-    # Dependabot:
-    # Bump python-jose from 3.3.0 to 3.4.0
-    m = re.search(
-        r"^[Bb]umps?\s+(\S+)\s+from\s+(\S+)\s+to\s+(\S+)",
-        title,
-    )
-    if m:
-        results.append(
-            VersionBump(
-                package=m.group(1),
-                from_version=m.group(2),
-                to_version=m.group(3),
-            )
-        )
-        return results
-
-    # Renovate:
-    # chore(deps): update dependency requests to v2.31.0
-    m = re.search(
-        r"(?:update|bump)(?:\s+dependency)?\s+(\S+)\s+to\s+v?(\S+)",
-        title,
-        re.IGNORECASE,
-    )
-    if m:
-        results.append(
-            VersionBump(
-                package=m.group(1),
-                from_version="",
-                to_version=m.group(2),
-            )
-        )
-
-    return results
 
 def _clean_version(version: str) -> str:
-    """
-    Strip semver range-operator prefixes (^, ~, >=, <=, >, <, =) and
-    surrounding whitespace from a version string.
- 
-    Renovate table cells often render the *range* rather than the bare
-    version, e.g. "^0.31.0" or "~> 1.2.3". Without stripping this, the
-    extracted to_version/from_version will never exactly equal a bare
-    version string computed elsewhere (e.g. "0.31.0" from an advisory's
-    first_patched field), causing downstream exact-match comparisons to
-    silently fail even though the versions are equivalent.
-    """
-    return version.lstrip("^~>=< ").strip()
+    """Strip semver prefixes and whitespace from a version string."""
+    return (version or "").lstrip("vV^~>=< ").strip()
 
-# Dependabot grouped-update table row, e.g.:
-#   | [axios](url) | 0.28.1 | 1.18.1 |
-#   | underscore   | 1.13.6 | 1.13.8 |
-#
-# Unlike the Renovate table below, grouped Dependabot PRs (raised via a
-# `groups:` block in dependabot.yml) render a plain 3-column table with no
-# backticks and no "->" arrow between versions — each version sits in its
-# own cell instead. Without a dedicated matcher, every package in a grouped
-# PR body silently produces zero VersionBump entries, which empties
-# version_bumps for the whole PR and drops every one of its packages out of
-# rollup/standalone matching into placeholder, even though the PR already
-# fixes them.
-_GROUPED_TABLE_ROW = re.compile(
-    r"^\|\s*\[?`?([\w@/.\-]+)`?\]?(?:\([^)]*\))?\s*\|\s*"
-    r"([0-9][0-9A-Za-z._+-]*)\s*\|\s*"
-    r"([0-9][0-9A-Za-z._+-]*)\s*\|"
-)
 
-def extract_from_body(body: str) -> list[VersionBump]:
-    """Pull all package updates out of the PR body."""
+def _strip_markdown_text(value: str) -> str:
+    value = value or ""
+    value = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", value)
+    value = value.replace("`", "").replace("*", "").strip()
+    value = re.sub(r"\s+\([^)]*\)$", "", value)
+    value = value.replace("(source)", "").replace("(source )", "")
+    return value.strip()
+
+
+def _add_version_bump(results: list[VersionBump], seen: set[tuple[str, str, str]], pkg: str, old: str, new: str) -> None:
+    pkg = _strip_markdown_text(pkg)
+    old = _clean_version(old)
+    new = _clean_version(new)
+    key = (pkg, old, new)
+    if pkg and key not in seen:
+        seen.add(key)
+        results.append(VersionBump(package=pkg, from_version=old, to_version=new))
+
+
+def _extract_dependabot_body(body: str) -> list[VersionBump]:
     body = body or ""
- 
-    results = []
-    seen = set()
- 
-    def add(pkg, old, new):
-        old = _clean_version(old)
-        new = _clean_version(new)
-        key = (pkg, old, new)
-        if pkg and key not in seen:
-            seen.add(key)
-            results.append(
-                VersionBump(
-                    package=pkg,
-                    from_version=old,
-                    to_version=new,
-                )
-            )
- 
-    # Dependabot
+    results: list[VersionBump] = []
+    seen: set[tuple[str, str, str]] = set()
+
     pattern = (
         r"(?:Bumps?|Updates?)\s+"
         r"\[?`?([^\]`\s]+)`?\]?"
@@ -109,71 +55,100 @@ def extract_from_body(body: str) -> list[VersionBump]:
         r"from\s+`?([0-9A-Za-z._+-]+)`?\s+"
         r"to\s+`?([0-9A-Za-z._+-]+)`?"
     )
- 
-    for m in re.finditer(pattern, body, re.IGNORECASE):
-        add(
-            m.group(1),
-            m.group(2),
-            m.group(3),
-        )
- 
-    # Renovate markdown table
-    for line in body.splitlines():
-        if "->" not in line or "|" not in line:
-            continue
- 
-        pkg_match = re.match(
-            r"\s*\|\s*\[?`?([\w@/.\-]+)`?\]?(?:\([^)]*\))?\s*\|",
-            line,
-        )
- 
-        ver_match = re.search(
-            r"`([^`]+)`\s*->\s*`([^`]+)`",
-            line,
-        )
- 
-        if pkg_match and ver_match:
-            add(
-                pkg_match.group(1),
-                ver_match.group(1),
-                ver_match.group(2),
-            )
 
-    # Dependabot grouped-update table (plain 3-column, no arrow/backticks).
-    # Runs as its own pass over lines the Renovate-table loop above didn't
-    # already claim (those contain "->" and are handled there), so a single
-    # line is never double-counted between the two table matchers.
+    for match in re.finditer(pattern, body, re.IGNORECASE):
+        _add_version_bump(results, seen, match.group(1), match.group(2), match.group(3))
+
+    grouped_pattern = re.compile(
+        r"^\|\s*\[?`?([\w@/.\-]+)`?\]?(?:\([^)]*\))?\s*\|\s*"
+        r"([0-9][0-9A-Za-z._+-]*)\s*\|\s*"
+        r"([0-9][0-9A-Za-z._+-]*)\s*\|",
+        re.IGNORECASE,
+    )
     for line in body.splitlines():
-        if "->" in line or "|" not in line:
+        if "->" in line or "→" in line or "|" not in line:
+            continue
+        match = grouped_pattern.match(line.strip())
+        if match:
+            _add_version_bump(results, seen, match.group(1), match.group(2), match.group(3))
+
+    generic_pattern = re.compile(
+        r"([\w@/.\-]+)\s+from\s+`?([0-9A-Za-z._+-]+)`?\s+to\s+`?([0-9A-Za-z._+-]+)`?",
+        re.IGNORECASE,
+    )
+    for match in generic_pattern.finditer(body):
+        _add_version_bump(results, seen, match.group(1), match.group(2), match.group(3))
+
+    return results
+
+
+def _extract_renovate_body(body: str) -> list[VersionBump]:
+    body = body or ""
+    results: list[VersionBump] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    for line in body.splitlines():
+        row = line.strip()
+        if not row.startswith("|") or "|" not in row:
+            continue
+        if re.match(r"^\|?\s*[-|: ]+\|", row):
             continue
 
-        m = _GROUPED_TABLE_ROW.match(line.strip())
-        if m:
-            add(
-                m.group(1),
-                m.group(2),
-                m.group(3),
-            )
- 
-    # Generic fallback
-    if not results:
-        for m in re.finditer(
-            r"([\w@/.\-]+)\s+from\s+`?([0-9A-Za-z._+-]+)`?\s+to\s+`?([0-9A-Za-z._+-]+)`?",
-            body,
-            re.IGNORECASE,
-        ):
-            add(
-                m.group(1),
-                m.group(2),
-                m.group(3),
-            )
- 
+        columns = [part.strip() for part in row.strip("|").split("|")]
+        if len(columns) < 2:
+            continue
+
+        package_cell = columns[0]
+        if package_cell.lower() in {"package", "dependency", "name", "---"}:
+            continue
+
+        package = _strip_markdown_text(package_cell)
+        if not package:
+            continue
+
+        change_cell = next((cell for cell in columns[1:] if "→" in cell or "->" in cell), "")
+        if not change_cell:
+            continue
+
+        version_match = re.search(
+            r"`?([0-9A-Za-z._~^=<>+-]+)`?\s*(?:->|→)\s*`?([0-9A-Za-z._~^=<>+-]+)`?",
+            change_cell,
+        )
+        if not version_match:
+            continue
+
+        _add_version_bump(results, seen, package, version_match.group(1), version_match.group(2))
+
+    return results
+
+
+def extract_from_body(body: str) -> list[VersionBump]:
+    """Pull all package updates out of the PR body by updater type."""
+    return _extract_dependabot_body(body) + _extract_renovate_body(body)
+
+
+def extract_from_title(title: str) -> list[VersionBump]:
+    """Support direct dependency bumps formatted in the PR title."""
+    title = title or ""
+    results: list[VersionBump] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    pattern = re.compile(
+        r"(?i)\b(?:bump|update|upgrade)\s+"
+        r"([\w@/.:\-]+)\s+from\s+"
+        r"([0-9A-Za-z._~^=<>+-]+)\s+to\s+"
+        r"([0-9A-Za-z._~^=<>+-]+)"
+    )
+
+    for match in pattern.finditer(title):
+        _add_version_bump(results, seen, match.group(1), match.group(2), match.group(3))
+
     return results
 
 
 def get_version_bumps(title: str, body: str) -> list[VersionBump]:
-    updates = extract_from_body(body)
-    if not updates:
-        updates = extract_from_title(title)
-
-    return updates
+    """Return version bumps from the PR body, falling back to the title."""
+    bumps = extract_from_body(body)
+    if bumps:
+        return bumps
+    return extract_from_title(title)

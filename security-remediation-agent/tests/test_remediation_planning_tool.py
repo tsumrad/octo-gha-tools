@@ -78,6 +78,11 @@ def make_transitive_pkg(*, remediated_version: str = TRANSITIVE_FIX_VERSION) -> 
         remediated_version=remediated_version,
         istransitive=True,
         transitive_source_package=transitive_source_package,
+        dependency_path=["axios", TRANSITIVE_PACKAGE] if remediated_version else [],
+        nearest_declared_parent="axios" if remediated_version else "",
+        remediation_target_dependency="axios" if remediated_version else "",
+        graph_confidence="high" if remediated_version else "unavailable",
+        graph_status="dependency graph available" if remediated_version else "dependency graph unavailable",
         vulnerabilities=[
             make_alert(
                 package=TRANSITIVE_PACKAGE,
@@ -107,7 +112,13 @@ def test_fix_direction_without_existing_pr_creates_placeholder_plan() -> None:
 
     plan = build_direct_plan(pkg)
     assert_placeholder_plan(plan, "demo")
-    assert "**Target version:** 2.0.0" in plan.action.placeholder_markdown
+    assert "## demo" in plan.action.placeholder_markdown
+    assert "Package: demo" in plan.action.placeholder_markdown
+    assert "Type: unknown" in plan.action.placeholder_markdown
+    assert "Affected: <2.0.0" in plan.action.placeholder_markdown
+    assert "Fixed: >=2.0.0" in plan.action.placeholder_markdown
+    assert "Is Breaking Dependency: No" in plan.action.placeholder_markdown
+    assert "Advisories:\n- GHSA-demo" in plan.action.placeholder_markdown
 
 
 def test_critical_transitive_fix_direction_without_pr_creates_placeholder_plan() -> None:
@@ -115,20 +126,33 @@ def test_critical_transitive_fix_direction_without_pr_creates_placeholder_plan()
 
     assert plan.package.effective_severity == "critical"
     assert_placeholder_plan(plan, "axios")
-    assert f"`axios >= {TRANSITIVE_FIX_VERSION}`" in plan.action.placeholder_markdown
-    assert "### Issue details" in plan.action.placeholder_markdown
-    assert f"| Patched vulnerable package version | `{TRANSITIVE_FIX_VERSION}` |" in plan.action.placeholder_markdown
-    assert "### Source details" in plan.action.placeholder_markdown
-    assert "| Source package to update | `axios` |" in plan.action.placeholder_markdown
-    assert f"| Source candidates from dependency graph | {TRANSITIVE_SOURCE} |" in plan.action.placeholder_markdown
+    assert f"## {TRANSITIVE_PACKAGE}" in plan.action.placeholder_markdown
+    assert f"Package: {TRANSITIVE_PACKAGE}" in plan.action.placeholder_markdown
+    assert "Type: transitive" in plan.action.placeholder_markdown
+    assert f"Affected: {TRANSITIVE_RANGE}" in plan.action.placeholder_markdown
+    assert f"Fixed: >={TRANSITIVE_FIX_VERSION}" in plan.action.placeholder_markdown
+    assert "Is Breaking Dependency: No" in plan.action.placeholder_markdown
+    assert f"Dependency paths:\n- axios → {TRANSITIVE_PACKAGE}" in plan.action.placeholder_markdown
+    assert "Advisories:\n- GHSA-form-data" in plan.action.placeholder_markdown
 
 
-def test_transitive_triage_does_not_override_alert_remediated_version() -> None:
+def test_transitive_triage_preserves_patched_vulnerable_package_version() -> None:
     from src.agents.vulnerability_triage_agent import VulnerabilityTriageAgent
 
     pkg = make_transitive_pkg(remediated_version="")
 
     VulnerabilityTriageAgent().apply_triage_recommendation(pkg)
 
-    assert pkg.remediated_version == ""
+    assert pkg.remediated_version == TRANSITIVE_FIX_VERSION
     assert pkg.upgrade_version == ""
+
+
+def test_indirect_alert_placeholder_is_not_marked_direct() -> None:
+    pkg = make_direct_pkg()
+    pkg.vulnerabilities[0].relationship = "indirect"
+
+    plan = build_direct_plan(pkg)
+
+    assert plan.package.relationship == "transitive"
+    assert "[non-breaking, direct]" not in plan.action.placeholder_markdown
+    assert "Type: transitive" in plan.action.placeholder_markdown
