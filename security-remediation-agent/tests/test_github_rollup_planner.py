@@ -4,7 +4,7 @@ from src.tools import github_rollup_planner as planner
 
 
 def test_parse_severities_normalizes_csv():
-    assert planner.parse_severities("HIGH, medium") == {"high", "medium"}
+    assert planner.parse_severities("HIGH, moderate") == {"high", "moderate"}
 
 
 def test_parse_severities_rejects_invalid_values():

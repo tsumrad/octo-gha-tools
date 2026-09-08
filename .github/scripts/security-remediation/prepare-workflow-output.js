@@ -2,11 +2,16 @@
 const fs = require('fs');
 const SEVERITIES = ['critical', 'high', 'medium', 'low', 'unknown'];
 
+function normalizeSeverity(value) {
+  const severity = value?.trim().toLowerCase();
+  return severity === 'moderate' ? 'medium' : severity;
+}
+
 function prepareOutput(raw, severities = 'critical,high,medium,low') {
   if (!raw || !Array.isArray(raw.remediation_plans)) {
     throw new Error('Expected orchestrator RemediationPlan.remediation_plans array');
   }
-  const selected = new Set(severities.split(',').map(s => s.trim().toLowerCase()));
+  const selected = new Set(severities.split(',').map(normalizeSeverity));
   for (const severity of selected) {
     if (!SEVERITIES.includes(severity)) throw new Error(`Invalid severity: ${severity}`);
   }
@@ -14,8 +19,8 @@ function prepareOutput(raw, severities = 'critical,high,medium,low') {
   for (const [issueIndex, issue] of raw.remediation_plans.entries()) {
     for (const [packageIndex, pkg] of issue.packages.entries()) {
       const vulnerabilities = pkg.vulnerabilities || [];
-      const severity = SEVERITIES.find(s => vulnerabilities.some(v => v.severity?.toLowerCase() === s))
-        || issue.severity?.toLowerCase() || 'unknown';
+      const severity = SEVERITIES.find(s => vulnerabilities.some(v => normalizeSeverity(v.severity) === s))
+        || normalizeSeverity(issue.severity) || 'unknown';
       if (!selected.has(severity)) continue;
       const target = pkg.upgrade_to_version || pkg.fixed_maximum_version || pkg.fixed_minimum_version || '';
       // Only reuse a PR whose package and target match the planned upgrade.

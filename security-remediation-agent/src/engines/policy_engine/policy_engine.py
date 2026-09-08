@@ -7,7 +7,7 @@ from ...tools.github_vulnerability_collector.model.vulnerability_alert import Vu
 SEVERITY_PRIORITY = {
     "critical": 4,
     "high": 3,
-    "medium": 2,
+    "moderate": 2,
     "low": 1,
     "unknown": 0,
 }

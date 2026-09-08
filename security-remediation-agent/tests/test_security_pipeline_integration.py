@@ -80,7 +80,7 @@ async def test_collect_triage_plan_matches_existing_direct_remediation_pr(monkey
     codescanning_alerts = [
         CodescanningAlert(
             number=10,
-            severity="medium",
+            severity="moderate",
             rule_id="py/import-security",
             summary="Import uses a vulnerable dependency",
         )

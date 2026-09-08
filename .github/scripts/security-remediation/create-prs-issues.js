@@ -9,11 +9,11 @@ const results = fs.existsSync('rollup-results.json')
   : { branches: {} };
 const BASE_BRANCH = process.env.BASE_BRANCH;
 
-const SEV_EMOJI = { critical: '🔴', high: '🟠', medium: '🟡', low: '🔵' };
-const SEV_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
+const SEV_EMOJI = { critical: '🔴', high: '🟠', moderate: '🟡', low: '🔵' };
+const SEV_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', moderate: 'Medium', low: 'Low' };
 const IMP_LABEL = { 'non-breaking': 'Non-Breaking', breaking: 'Breaking' };
 const ACT_LABEL = { rollup: 'Rollup', standalone: 'Standalone', placeholder: 'Placeholder', 'open-issue': 'Open Issue' };
-const ORDER = ['critical', 'high', 'medium', 'low'];
+const ORDER = ['critical', 'high', 'medium', 'moderate', 'low'];
 
 const ACTION_LABELS = {
   'non-breaking-rollup': { color: '2da44e', description: 'Non-breaking fix included in a rollup PR' },
@@ -325,10 +325,30 @@ for (const [stubBranch, plans] of Object.entries(plansByStubBranch)) {
 }
 
 const createdIssues = {};
+const issueGroups = new Map();
 
 for (const severity of ORDER) {
-  const group = output[severity];
-  if (!group || !group.plans || group.plans.length === 0) continue;
+  for (const plan of output[severity]?.plans || []) {
+    const ecosystem = plan.package.ecosystem || 'unknown';
+    const upgradeGroup = getImpact(plan) === 'breaking'
+      ? `Major(${plan.package.name})` : 'Minor-Patch';
+    const key = JSON.stringify([ecosystem, upgradeGroup, severity]);
+    if (!issueGroups.has(key)) {
+      issueGroups.set(key, { ecosystem, upgradeGroup, severity, plans: [] });
+    }
+    issueGroups.get(key).plans.push(plan);
+  }
+}
+
+for (const [issueKey, group] of issueGroups) {
+  const { ecosystem, upgradeGroup, severity } = group;
+  const groupPlans = new Set(group.plans);
+  const groupPRs = cat => {
+    const prs = createdPRs[cat];
+    return Array.isArray(prs)
+      ? prs.filter(pr => group.plans.some(plan => plan.package.name === pr.package))
+      : prs;
+  };
 
   const nbPlans = group.plans.filter(p => p.fix.fix_class !== 'BREAKING_BUMP');
   const bPlans = group.plans.filter(p => p.fix.fix_class === 'BREAKING_BUMP');
@@ -336,7 +356,7 @@ for (const severity of ORDER) {
   const directPlans = group.plans.filter(p => !isTransitivePkg(p));
   const transitivePs = group.plans.filter(isTransitivePkg);
   const totalAlerts = group.plans.reduce((n, p) => n + (p.package.unique_ghsas || []).length, 0);
-  const title = `[Security Remediation] [${SEV_LABEL[severity]}] Vulnerability Remediation Tracking`;
+  const title = `[Security Remediation] [${ecosystem}] [${upgradeGroup}] [${SEV_LABEL[severity]}] Vulnerability Remediation Tracking`;
   const emoji = SEV_EMOJI[severity] || '';
 
   const uniqueDeps = arr => [...new Set(arr.map(p => p.package.name))].join(', ') || '—';
@@ -346,7 +366,7 @@ for (const severity of ORDER) {
   const nbDepsStr = uniqueDeps(nbPlans);
   const bDepsStr = uniqueDeps(bPlans);
 
-  let body = `# ${emoji} ${SEV_LABEL[severity]} Vulnerability Remediation Tracking\n\n`;
+  let body = `# ${emoji} [${ecosystem}] [${upgradeGroup}] [${SEV_LABEL[severity]}] Vulnerability Remediation Tracking\n\n`;
   body += `**Base Branch**: \`${BASE_BRANCH}\`\n`;
   body += `**Workflow Run**: [#${context.runId}](${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId})\n\n`;
 
@@ -361,9 +381,9 @@ for (const severity of ORDER) {
   for (const imp of ['non-breaking', 'breaking']) {
     for (const act of ['rollup', 'standalone', 'placeholder', 'open-issue']) {
       const cat = `${severity}-${imp}-${act}`;
-      const cPlans = categoryMap[cat] || [];
+      const cPlans = (categoryMap[cat] || []).filter(plan => groupPlans.has(plan));
       if (cPlans.length === 0) continue;
-      const prInfo = createdPRs[cat];
+      const prInfo = groupPRs(cat);
       const br = results.branches?.[cat];
       const pkgList = cPlans.map(p => `\`${p.package.name}\``).join(', ');
 
@@ -410,12 +430,12 @@ for (const severity of ORDER) {
   for (const imp of ['non-breaking', 'breaking']) {
     for (const act of ['rollup', 'standalone', 'placeholder', 'open-issue']) {
       const cat = `${severity}-${imp}-${act}`;
-      const cPlans = categoryMap[cat] || [];
+      const cPlans = (categoryMap[cat] || []).filter(plan => groupPlans.has(plan));
       if (cPlans.length === 0) continue;
       body += `## ${IMP_LABEL[imp]} - ${ACT_LABEL[act]} Updates\n\n`;
 
       if (act === 'placeholder') {
-        const phPRs = createdPRs[cat] || [];
+        const phPRs = groupPRs(cat) || [];
         const uniqPRs = [...new Map(phPRs.map(p => [p.number, p])).values()];
         if (uniqPRs.length > 0) {
           body += `**Placeholder PR**: ${uniqPRs.map(p => `[#${p.number}](${p.url})`).join(', ')} _(draft - push fixes or assign to agent)_\n\n`;
@@ -436,7 +456,7 @@ for (const severity of ORDER) {
         const alerts = buildAlerts(plan);
         const isTransitive = (plan.package.relationship || '').toLowerCase() === 'transitive' || plan.package.is_transitive === true;
         const transitiveOf = plan.package.transitive_source_packages || plan.package.transitive_source_package || [];
-        const allPlans = Object.values(output).flatMap(g => g.plans || []);
+        const allPlans = group.plans;
         const transitiveChildren = allPlans.filter(p => {
           const pIsTransitive = (p.package.relationship || '').toLowerCase() === 'transitive' || p.package.is_transitive === true;
           if (!pIsTransitive) return false;
@@ -525,14 +545,14 @@ for (const severity of ORDER) {
       await github.rest.issues.update({ owner, repo, issue_number: existing.number, body });
       await github.rest.issues.setLabels({ owner, repo, issue_number: existing.number, labels: issueLabels }).catch(() => {});
       core.info(`Updated tracking issue #${existing.number}: ${title}`);
-      createdIssues[severity] = { number: existing.number, url: existing.html_url, title };
+      createdIssues[issueKey] = { number: existing.number, url: existing.html_url, title };
     } else {
       const issue = await github.rest.issues.create({ owner, repo, title, body, labels: issueLabels });
       core.info(`Created tracking issue #${issue.data.number}: ${title}`);
-      createdIssues[severity] = { number: issue.data.number, url: issue.data.html_url, title };
+      createdIssues[issueKey] = { number: issue.data.number, url: issue.data.html_url, title };
     }
   } catch (err) {
-    core.warning(`Failed to create/update tracking issue for ${severity}: ${err.message}`);
+    core.warning(`Failed to create/update tracking issue for ${title}: ${err.message}`);
   }
 }
 

@@ -15,7 +15,6 @@ class RemediationPlannerAgent:
         self,
         triage_result: list[SecurityPackageTriage],
     ) -> RemediationPlan:
-        logger.info("Planning remediation for package: %s", len(triage_result))
         plans = await build_remediation_plan.ainvoke({"triage_result": triage_result})
 
         return plans
