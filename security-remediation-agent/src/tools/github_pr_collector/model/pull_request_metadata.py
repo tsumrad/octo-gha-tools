@@ -1,49 +1,9 @@
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+import logging
 from typing import Any
 
 from ..utils.version_bump_resolver import VersionBump, get_version_bumps
-
-
-def filter_security_dependency_pull_requests(
-    owner: str,
-    repo: str,
-    pull_requests: Iterable[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Compatibility helper used by older tests and callers.
-
-    Keeps the bot-only filtering behavior and normalizes the fields needed by
-    downstream security tooling.
-    """
-    results: list[dict[str, Any]] = []
-
-    for pull_request in pull_requests:
-        user = pull_request.get("user") or {}
-        login = user.get("login", "")
-        if "[bot]" not in login.lower():
-            continue
-
-        pr_number = pull_request.get("number")
-        if not pr_number:
-            continue
-
-        title = pull_request.get("title", "")
-        version_bumps = get_version_bumps(title, pull_request.get("body", ""))
-
-        results.append(
-            {
-                "pr_number": pr_number,
-                "pr_title": title,
-                "pr_branch": (pull_request.get("head") or {}).get("ref", ""),
-                "pull_url": pull_request.get("html_url", ""),
-                "version_bumps": [bump.model_dump() for bump in version_bumps],
-                "severity": "",
-                "author": login,
-            }
-        )
-
-    return results
-
 
 @dataclass
 class PullRequestMetadata:
@@ -90,7 +50,7 @@ class PullRequestMetadata:
 
 
 def is_bot_owner(user: str) -> bool:
-    return "[bot]" in user.lower()
+    return "bot" in user.lower()
 
 
 def build_pull_request_metadata(

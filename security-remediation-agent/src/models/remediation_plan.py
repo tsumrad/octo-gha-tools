@@ -51,6 +51,14 @@ class IssueContext:
 
 @dataclass
 class SummaryContext:
+    total_vulnerabilities: int = 0
+    total_code_scanning_alerts: int = 0
+    total_reviewed_prs: int = 0
+    total_ignored_prs: int = 0
+    total_remediation_prs: int = 0
+    total_created_rollup_prs: int = 0
+    total_created_issues: int = 0
+
     ecosystem_summary: list[EcosystemContext] = field(default_factory=list)
     
 

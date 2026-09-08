@@ -6,20 +6,20 @@ set -euo pipefail
 	echo
 } >>"$GITHUB_STEP_SUMMARY"
 
-if [ ! -f workflow-plans.json ]; then
+if [ ! -f orchestrator-output.json ]; then
 	echo "Orchestration did not complete." >>"$GITHUB_STEP_SUMMARY"
 	exit 0
 fi
 
 base_branch="${BASE_BRANCH}"
-open_security_alerts="$(jq '[.groups[].plans? // [] | .[] | (.package.unique_ghsas // [])[]] | unique | length' workflow-plans.json)"
-open_code_scanning_alerts="$(jq '[.groups[].plans? // [] | .[] | (.package.scanning_alerts // [])[]] | length' workflow-plans.json)"
-open_prs_reviewed="$(jq '[.groups[].plans? // [] | .[] | .action.pr_number? // empty] | unique | length' workflow-plans.json)"
-prs_matched="$(jq '[.groups[].plans? // [] | .[] | select(.action.action_type == "rollup_pr" or .action.action_type == "standalone_pr") | .action.pr_number] | unique | length' workflow-plans.json)"
-prs_ignored=$((open_prs_reviewed - prs_matched))
-findings_without_pr="$(jq '[.groups[].plans? // [] | .[] | select(.action.action_type == "placeholder_pr" or .action.action_type == "open_issue")] | length' workflow-plans.json)"
-auto_created_prs="$(jq '[.created_prs | to_entries[] | if (.value | type) == "array" then .value[] else .value end] | length' rollup-output.json 2>/dev/null || echo 0)"
-auto_created_issues="$(jq '.created_issues | length' rollup-output.json 2>/dev/null || echo 0)"
+# SummaryContext contains repository-wide totals, before severity filtering.
+open_security_alerts="$(jq '.summary.total_vulnerabilities // 0' orchestrator-output.json)"
+open_code_scanning_alerts="$(jq '.summary.total_code_scanning_alerts // 0' orchestrator-output.json)"
+open_prs_reviewed="$(jq '.summary.total_reviewed_prs // 0' orchestrator-output.json)"
+prs_matched="$(jq '.summary.total_remediation_prs // 0' orchestrator-output.json)"
+prs_ignored="$(jq '.summary.total_ignored_prs // 0' orchestrator-output.json)"
+auto_created_prs="$(jq '.summary.total_created_rollup_prs // 0' orchestrator-output.json)"
+auto_created_issues="$(jq '.summary.total_created_issues // 0' orchestrator-output.json)"
 
 {
 	echo "| Metric | Value |"
@@ -30,11 +30,24 @@ auto_created_issues="$(jq '.created_issues | length' rollup-output.json 2>/dev/n
 	echo "| Open PRs reviewed | ${open_prs_reviewed} |"
 	echo "| PRs matched (used as remediation) | ${prs_matched} |"
 	echo "| PRs ignored (no matching finding) | ${prs_ignored} |"
-	echo "| Findings without existing PR | ${findings_without_pr} |"
 	echo "| Remediation(Roll-up) PRs auto-created | ${auto_created_prs} |"
 	echo "| Tracking issues created/updated | ${auto_created_issues} |"
 	echo
 } >>"$GITHUB_STEP_SUMMARY"
+
+{
+	echo "### Vulnerable Packages by Ecosystem"
+	echo
+	echo "| Ecosystem | Direct Packages | Transitive Packages |"
+	echo "|-----------|-----------------|---------------------|"
+} >>"$GITHUB_STEP_SUMMARY"
+jq -r '
+  def cell: tostring | gsub("\\|"; "&#124;") | gsub("[\\r\\n]"; " ");
+  def packages: if length == 0 then "None" else map(cell) | join(", ") end;
+  (.summary.ecosystem_summary // [])[] |
+  "| \(.name | cell) | \((.direct_vulnerabile_packages // []) | packages) | \((.transitive_vulnerabile_packages // []) | packages) |"
+' orchestrator-output.json >>"$GITHUB_STEP_SUMMARY"
+echo >>"$GITHUB_STEP_SUMMARY"
 
 if [ -f rollup-output.json ]; then
 	dry_run="$(jq -r '.dry_run' rollup-output.json)"
@@ -73,6 +86,11 @@ if [ -f rollup-output.json ]; then
 			rollup-output.json >>"$GITHUB_STEP_SUMMARY"
 		echo >>"$GITHUB_STEP_SUMMARY"
 	fi
+fi
+
+# Category counts describe the selected workflow plans, when available.
+if [ ! -f workflow-plans.json ]; then
+	exit 0
 fi
 
 {

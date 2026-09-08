@@ -84,7 +84,8 @@ async def async_main() -> None:
     )
 
     result = await orchestrator.run(repo)
-    print(json.dumps(to_jsonable(result), indent=2, sort_keys=True))
+    print(result.summary)
+    #print(json.dumps(to_jsonable(result), indent=2, sort_keys=True))
 
 
 def normalize_duplicated_invocation(argv: list[str]) -> list[str]:

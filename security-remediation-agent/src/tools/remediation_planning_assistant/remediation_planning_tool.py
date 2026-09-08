@@ -59,7 +59,14 @@ def build_summary(
     """
 
     grouped: dict[str, EcosystemContext] = {}
-
+    total_vulnerabilities: int = 0
+    total_code_scanning_alerts: int = 0
+    total_reviewed_prs: int = 0
+    total_ignored_prs: int = 0
+    total_remediation_prs: int = 0
+    total_created_rollup_prs: int = 0
+    total_created_issues: int = 0    
+    
     for pkg in triage_result:
         ecosystem = grouped.setdefault(
             pkg.ecosystem,
@@ -67,6 +74,9 @@ def build_summary(
                 name=pkg.ecosystem,
             ),
         )
+        total_vulnerabilities += len(pkg.vulnerabilities)
+        total_reviewed_prs += len(pkg.pull_request_metadata)
+        total_remediation_prs += len(pkg.pull_request_metadata)
 
         # Direct / transitive classification
         if pkg.istransitive:
@@ -77,6 +87,13 @@ def build_summary(
                 ecosystem.direct_vulnerabile_packages.append(pkg.package)
 
     return SummaryContext(
+        total_vulnerabilities=total_vulnerabilities,
+        total_code_scanning_alerts=total_code_scanning_alerts,
+        total_reviewed_prs=total_reviewed_prs,
+        total_ignored_prs=total_ignored_prs,
+        total_remediation_prs=total_remediation_prs,
+        total_created_rollup_prs=total_created_rollup_prs,
+        total_created_issues=total_created_issues,
         ecosystem_summary=list(grouped.values()),
     )
 
@@ -98,7 +115,7 @@ def create_package_context(pkg: SecurityPackageTriage) -> PackageContext:
 
 def create_issue_context(triage_result: list[SecurityPackageTriage]) -> list[IssueContext]:
     #Create by ecosystem
-    grouped: dict[str, list[SecurityPackageTriage]] = defaultdict(list)
+    grouped: dict[str, list[SecurityPackageTriage]] = defaultdict(list)   
 
     for pkg in triage_result:
         grouped[pkg.ecosystem].append(pkg)

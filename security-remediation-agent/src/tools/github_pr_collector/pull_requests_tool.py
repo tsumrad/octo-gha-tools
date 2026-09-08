@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Any
 
@@ -101,7 +102,6 @@ async def pull_requests_tool(
     """Collect dependency-security pull requests from the repo's open PR list."""
 
     pull_requests = await get_open_pull_requests(owner=owner, repo=repo)
-
     metadata_list: list[PullRequestMetadata] = []
     for pull_request in pull_requests:
         if not pull_request.get("number"):
@@ -118,7 +118,6 @@ async def pull_requests_tool(
                 pull_request=pull_request,
             )
         )
-
     return metadata_list
 
 
