@@ -5,7 +5,7 @@ const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, 'create-prs-issues.js'), 'utf8');
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
-test('tracking issues group by ecosystem, major package or minor-patch, and severity', async () => {
+test('tracking issues group by ecosystem, major package or minor-patch, across severities', async () => {
   const plan = (name, ecosystem, major = false) => ({
     package: { name, ecosystem, effective_severity: 'medium', unique_ghsas: [], current_version_range: '1.0.0' },
     fix: { fix_class: major ? 'BREAKING_BUMP' : 'NON_BREAKING_BUMP' },
@@ -17,22 +17,33 @@ test('tracking issues group by ecosystem, major package or minor-patch, and seve
     high: { plans: [plan('postcss', 'npm')] },
   } };
   raw.groups.high.plans[0].package.effective_severity = 'high';
+  const rollupPlans = [raw.groups.medium.plans[2], raw.groups.high.plans[0]];
+  rollupPlans.forEach((p, index) => { p.action = { action_type: 'rollup_pr', pr_number: index + 10 }; });
+  const branchResults = { branches: { 'non-breaking-rollup': {
+    branch: 'security-remediation/non-breaking-rollup', pushed: true,
+    included_prs: [10, 11], excluded_prs: [],
+  } } };
+  const createdPulls = [];
   const created = [];
   const updated = [];
   let output;
-  const existingTitle = '[Security Remediation] [npm] [Major(axios)] [Medium] Vulnerability Remediation Tracking';
+  const existingTitle = '[Security Remediation] [npm] [Major(axios)] Vulnerability Remediation Tracking';
   const github = { rest: {
+    pulls: {
+      list: async () => ({ data: [] }),
+      create: async args => { createdPulls.push(args); return { data: { number: 99, html_url: 'https://example.test/99' } }; },
+    },
     search: { issuesAndPullRequests: async () => ({ data: { items: [
       { title: existingTitle, number: 42, html_url: 'https://example.test/42' },
     ] } }) },
     issues: {
-      getLabel: async () => ({}), setLabels: async () => ({}),
+      getLabel: async () => ({}), setLabels: async () => ({}), addLabels: async () => ({}),
       update: async args => { updated.push(args); },
       create: async args => { created.push(args); return { data: { number: created.length, html_url: 'https://example.test/issue' } }; },
     },
   } };
   const fakeFs = {
-    readFileSync: () => JSON.stringify(raw), existsSync: () => false,
+    readFileSync: file => JSON.stringify(file === 'rollup-results.json' ? branchResults : raw), existsSync: () => true,
     writeFileSync: (file, data) => { output = JSON.parse(data); },
   };
   await new AsyncFunction('github', 'context', 'core', 'require', 'process', 'console', source)(
@@ -41,11 +52,15 @@ test('tracking issues group by ecosystem, major package or minor-patch, and seve
     name => { assert.equal(name, 'fs'); return fakeFs; }, { env: { BASE_BRANCH: 'main' } }, console,
   );
   assert.equal(updated.length, 1);
+  assert.equal(createdPulls.length, 1);
+  assert.equal(createdPulls[0].title, '[Security Remediation] [Rollup] Non-Breaking Updates');
+  assert.match(createdPulls[0].body, /#10/);
+  assert.match(createdPulls[0].body, /#11/);
   assert.equal(updated[0].issue_number, 42);
-  assert.equal(created.length, 4);
-  assert.equal(output.stats.total_issues_created, 5);
-  assert.equal(Object.keys(output.created_issues).length, 5);
-  const minor = created.find(i => i.title === '[Security Remediation] [npm] [Minor-Patch] [Medium] Vulnerability Remediation Tracking');
+  assert.equal(created.length, 3);
+  assert.equal(output.stats.total_issues_created, 4);
+  assert.equal(Object.keys(output.created_issues).length, 4);
+  const minor = created.find(i => i.title === '[Security Remediation] [npm] [Minor-Patch] Vulnerability Remediation Tracking');
   assert.ok(minor);
   assert.match(minor.body, /`postcss`/);
   assert.match(minor.body, /`nanoid`/);

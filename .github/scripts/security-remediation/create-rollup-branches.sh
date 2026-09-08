@@ -8,7 +8,7 @@ echo '{"branches":{},"stubs":{}}' >"$RESULTS_FILE"
 git fetch origin "${BASE_BRANCH}"
 
 # Collect all unique categories from the orchestrator output
-# category = "<severity>-<non-breaking|breaking>-<rollup|standalone>"
+# category = "<non-breaking|breaking>-<rollup|standalone>"
 # Only rollup_pr and standalone_pr plans have real branches to merge.
 categories="$(jq -r '
   (.groups // .) |
@@ -16,28 +16,26 @@ categories="$(jq -r '
     to_entries[] |
     .value.plans[]? |
     select(.action.action_type == "rollup_pr" or .action.action_type == "standalone_pr") |
-    (.package.effective_severity) as $sev |
     (if .fix.fix_class == "BREAKING_BUMP" then "breaking" else "non-breaking" end) as $imp |
     (if .action.action_type == "rollup_pr" then "rollup" else "standalone" end) as $act |
-    "\($sev)-\($imp)-\($act)"
+    "\($imp)-\($act)"
   ] | unique[]
 ' "$OUTPUT_FILE")"
 
 for category in $categories; do
-	# category format: <sev>-<imp>-<act>  e.g. critical-non-breaking-rollup
-	sev="$(echo "$category" | cut -d'-' -f1)"
+	# category format: <imp>-<act>, e.g. non-breaking-rollup
 	act="$(echo "$category" | rev | cut -d'-' -f1 | rev)"
-	imp="$(echo "$category" | cut -d'-' -f2-$(($(echo "$category" | tr '-' '\n' | wc -l) - 1)))"
+	imp="${category%-*}"
 
 	# Extract plans for this category
 	# pr_branch is not in the orchestrator output, so we resolve it via gh CLI.
-	plans_json="$(jq --arg sev "$sev" --arg imp "$imp" --arg act "$act" '
+	plans_json="$(jq --arg imp "$imp" --arg act "$act" '
     (.groups // .) |
     [
       to_entries[] |
       .value.plans[]? |
       select(
-        .package.effective_severity == $sev and
+        (.action.action_type == "rollup_pr" or .action.action_type == "standalone_pr") and
         (if .fix.fix_class == "BREAKING_BUMP" then "breaking" else "non-breaking" end) == $imp and
         (if .action.action_type == "rollup_pr" then "rollup" else "standalone" end) == $act and
         .action.pr_number != null
@@ -134,7 +132,7 @@ done
 
 echo "Branch creation complete."
 
-# Placeholder plans are split by severity and impact and put on separate stub branches.
+# Placeholder plans are split by impact and put on separate stub branches.
 echo "Creating stub branches for placeholder PRs..."
 
 placeholder_plans="$(jq -r '
@@ -143,7 +141,6 @@ placeholder_plans="$(jq -r '
   .value.plans[]? |
   select(.action.action_type == "placeholder_pr") |
   [
-    (.package.effective_severity // .package.severity // "unknown" | ascii_downcase),
     (if .fix.fix_class == "BREAKING_BUMP" then "breaking" else "non-breaking" end),
     .package.name,
     .package.ecosystem,
@@ -167,16 +164,16 @@ get_plan_markdown() {
 declare -A group_plan_count
 mkdir -p /tmp/remediation-plans
 
-while IFS=$'\t' read -r sev imp pkg_name ecosystem plan_id target_pkg fix_ver; do
+while IFS=$'\t' read -r imp pkg_name ecosystem plan_id target_pkg fix_ver; do
 	[ -z "$plan_id" ] && continue
 
-	group_key="${sev}-${imp}"
+	group_key="${imp}"
 	stub_branch="security-remediation/placeholder/${group_key}"
 	content_file="/tmp/remediation-plans/${group_key}.md"
 
 	if [ "${group_plan_count[$group_key]:-0}" -eq 0 ]; then
 		{
-			echo "# ${sev} Severity (${imp}) - Security Remediation Plan"
+			echo "# ${imp} - Security Remediation Plan"
 			echo
 		} >"${content_file}"
 	fi
