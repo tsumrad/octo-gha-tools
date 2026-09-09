@@ -62,13 +62,21 @@ function normalizeGroupingName(name) {
   return withoutSubpath;
 }
 
-// Determines the package name used for issue grouping: for transitive
-// packages, always use a parent/introducer package; otherwise use the
-// package's own name. When multiple introducers exist, pick deterministically
-// (alphabetically) so packages sharing the same introducer set always group
-// together, regardless of array ordering in the source data.
-function getGroupingPackageName(plan) {
-  if (!isTransitivePlan(plan)) return plan.package.name;
+// Determines the grouping key for a plan's issue bucket. For transitive
+// packages, group by the shared set of introducer pull request numbers -
+// packages fixed by the same PR(s) always land in the same issue, regardless
+// of which parent/introducer package happens to be listed first or how many
+// scopes (e.g. @vue, @types, @typescript-eslint) are involved. Falls back to
+// a normalized parent package name when no introducer PRs are available.
+function getGroupingKey(plan) {
+  if (!isTransitivePlan(plan)) return normalizeGroupingName(plan.package.name);
+
+  const introducerPRs = [...new Set(
+    (plan.package.introducer_pull_requests || [])
+      .map(pr => pr && pr.pr_number)
+      .filter(n => n != null)
+  )].sort((a, b) => a - b);
+  if (introducerPRs.length > 0) return `PR(${introducerPRs.join(',')})`;
 
   const occurrences = plan.package.dependency_occurrences || [];
   const introducerNames = [...new Set(occurrences.flatMap(occ => (occ.introducers || []).map(i => i.package)))]
@@ -83,6 +91,20 @@ function getGroupingPackageName(plan) {
       .sort();
     return names[0];
   }
+
+  return normalizeGroupingName(plan.package.name);
+}
+
+// Human-readable label for the grouping key, used in the issue title.
+// PR-based keys are rendered using the (sorted) parent/introducer package
+// names instead of raw PR numbers, for readability.
+function getGroupingLabel(plan, groupingKey) {
+  if (!groupingKey.startsWith('PR(')) return groupingKey;
+
+  const occurrences = plan.package.dependency_occurrences || [];
+  const introducerNames = [...new Set(occurrences.flatMap(occ => (occ.introducers || []).map(i => i.package)))]
+    .map(normalizeGroupingName).sort();
+  if (introducerNames.length > 0) return introducerNames[0];
 
   return normalizeGroupingName(plan.package.name);
 }
@@ -375,14 +397,24 @@ const issueGroups = new Map();
 for (const sourceGroup of Object.values(output)) {
   for (const plan of sourceGroup.plans || []) {
     const ecosystem = plan.package.ecosystem || 'unknown';
-    const upgradeGroup = getImpact(plan) === 'breaking'
-      ? `Major(${getGroupingPackageName(plan)})` : 'Minor-Patch';
+    let upgradeGroup = 'Minor-Patch';
+    if (getImpact(plan) === 'breaking') {
+      const groupingKey = getGroupingKey(plan);
+      const groupingLabel = getGroupingLabel(plan, groupingKey);
+      upgradeGroup = `Major(${groupingLabel})::${groupingKey}`;
+    }
     const key = JSON.stringify([ecosystem, upgradeGroup]);
     if (!issueGroups.has(key)) {
       issueGroups.set(key, { ecosystem, upgradeGroup, plans: [] });
     }
     issueGroups.get(key).plans.push(plan);
   }
+}
+
+for (const [issueKey, group] of issueGroups) {
+  // Display-only upgrade group label: strip the internal grouping-key suffix
+  // used to disambiguate distinct PR-based buckets that share a display label.
+  group.upgradeGroup = group.upgradeGroup.replace(/::.*$/, '');
 }
 
 for (const [issueKey, group] of issueGroups) {
