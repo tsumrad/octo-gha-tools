@@ -63,20 +63,25 @@ function normalizeGroupingName(name) {
 }
 
 // Determines the package name used for issue grouping: for transitive
-// packages, always use the (first) parent/introducer package; otherwise use
-// the package's own name.
+// packages, always use a parent/introducer package; otherwise use the
+// package's own name. When multiple introducers exist, pick deterministically
+// (alphabetically) so packages sharing the same introducer set always group
+// together, regardless of array ordering in the source data.
 function getGroupingPackageName(plan) {
   if (!isTransitivePlan(plan)) return plan.package.name;
 
   const occurrences = plan.package.dependency_occurrences || [];
-  const introducerNames = occurrences.flatMap(occ => (occ.introducers || []).map(i => i.package));
-  if (introducerNames.length > 0) return normalizeGroupingName(introducerNames[0]);
+  const introducerNames = [...new Set(occurrences.flatMap(occ => (occ.introducers || []).map(i => i.package)))]
+    .map(normalizeGroupingName).sort();
+  if (introducerNames.length > 0) return introducerNames[0];
 
   const sources = plan.package.transitive_source_packages || plan.package.transitive_source_package || [];
   if (sources.length > 0) {
-    const [first] = sources;
-    const name = first.includes('@') && first.lastIndexOf('@') > 0 ? first.slice(0, first.lastIndexOf('@')) : first;
-    return normalizeGroupingName(name);
+    const names = sources
+      .map(s => (s.includes('@') && s.lastIndexOf('@') > 0 ? s.slice(0, s.lastIndexOf('@')) : s))
+      .map(normalizeGroupingName)
+      .sort();
+    return names[0];
   }
 
   return normalizeGroupingName(plan.package.name);
