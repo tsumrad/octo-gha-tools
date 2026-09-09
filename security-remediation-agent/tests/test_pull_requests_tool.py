@@ -1,15 +1,29 @@
 import pytest
 
-from tools.github_pr_collector import pull_requests_tool as tool_module
-from tools.github_pr_collector.model.pull_request_metadata import (
+from src.tools import pull_requests_tool as tool_module
+from src.tools.model.pull_request_metadata import (
     PullRequestMetadata,
     filter_security_dependency_pull_requests,
 )
-from tools.github_pr_collector.pull_requests_tool import (
+from src.tools.pull_requests_tool import (
     get_open_pull_requests,
     security_dependency_pull_requests_tool,
 )
-from tools.github_pr_collector.utils.version_bump_resolver import get_version_bumps
+from src.tools.utils.version_bump_resolver import get_version_bumps, _extract_dependabot_body
+
+
+def test_extract_dependabot_grouped_nanoid_body():
+    title = "Bump nanoid from 3.3.7 to 3.3.18 in /web in the npm_and_yarn group across 1 directory"
+    body = (
+        "Bumps the npm_and_yarn group with 1 update in the /web directory: "
+        "[nanoid](https://github.com/ai/nanoid).\n\n"
+        "Updates `nanoid` from 3.3.7 to 3.3.18\n"
+        "<details>\n<summary>Release notes</summary>\n"
+        "<h2>3.3.18</h2>\n</details>\n"
+    )
+    expected = [{"package": "nanoid", "from_version": "3.3.7", "to_version": "3.3.18"}]
+    assert [b.model_dump() for b in _extract_dependabot_body(body)] == expected
+    assert [b.model_dump() for b in get_version_bumps(title, body)] == expected
 
 
 class StubResponse:

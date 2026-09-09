@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+from asyncio.log import logger
 import json
 import logging
 import os
@@ -84,11 +85,12 @@ async def async_main() -> None:
     )
 
     result = await orchestrator.run(repo)
-    logging.getLogger(__name__).info("Remediation summary: %s", result.summary)
     for pkg in result.remediation_plans:
         logging.getLogger(__name__).info("Remediation plan: %s (%d packages)", pkg.ecosystem, len(pkg.packages))
         for package in pkg.packages:
-            logging.getLogger(__name__).info("  Package: %s (%d vulnerabilities, %d pull requests, %s)", package.name, len(package.vulnerabilities), len(package.pull_requests), package.relationship)
+           if package.name == "follow-redirects":
+                logging.getLogger(__name__).info(package)
+            #logging.getLogger(__name__).info("  Package: %s (%d vulnerabilities, %d pull requests, %s)", package.name, len(package.vulnerabilities), len(package.pull_requests), package.relationship)
     # stdout is the workflow's JSON interface, including when no packages need remediation.
     print(json.dumps(to_jsonable(result), indent=2, sort_keys=True))
 

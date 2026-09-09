@@ -4,13 +4,13 @@ import pytest
 
 from src.agents import vulnerability_collector_agent as agent_module
 from src.agents.vulnerability_collector_agent import vulnerabilityCollectorAgent
-from src.tools.github_vulnerability_collector import dependabot_alerts_tool as tool_module
-from src.tools.github_vulnerability_collector.dependabot_alerts_tool import (
+from src.tools import dependabot_alerts_tool as tool_module
+from src.tools.dependabot_alerts_tool import (
     DependabotAlertInput,
     dependabot_alerts_tool,
     get_dependabot_alerts,
 )
-from src.tools.github_vulnerability_collector.model.vulnerability_alert import (
+from src.tools.model.vulnerability_alert import (
     VulnerabilityAlert,
     build_alerts_by_package,
 )
@@ -140,7 +140,7 @@ def test_build_alerts_by_package_normalizes_dependabot_alerts():
                 "relationship": "",
             },
         ]
-    )
+    }
 
 
 def test_vulnerability_alert_model_normalizes_dependabot_alert():
@@ -278,4 +278,4 @@ async def test_vulnerability_collector_agent_uses_dependabot_tool(monkeypatch):
         codescanning_alerts=[
             {"codescanning_tool_input": {"owner": "octo-org", "repo": "octo-repo"}}
         ],
-    }
+    )

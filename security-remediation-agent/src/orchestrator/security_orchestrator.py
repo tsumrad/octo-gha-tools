@@ -2,11 +2,11 @@ import logging
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
-from models.remediation_plan import RemediationPlan
-from models.security_remediation_context import SecurityRemediationContext
+from src.models.remediation_plan import RemediationPlan
+from src.models.security_remediation_context import SecurityRemediationContext
 
-from ..models.security_findings import SecurityFindings
-from ..models.security_package_triage import SecurityPackageTriage
+from src.models.security_findings import SecurityFindings
+from src.models.security_package_triage import SecurityPackageTriage
 
 logger = logging.getLogger(__name__)
 

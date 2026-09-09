@@ -7,7 +7,7 @@ import httpx
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
 
-from .model.vulnerability_alert import VulnerabilityAlert
+from src.tools.model.vulnerability_alert import VulnerabilityAlert
 
 DEFAULT_SEVERITIES = frozenset({"critical", "high", "medium", "low"})
 GITHUB_API_VERSION = "2022-11-28"

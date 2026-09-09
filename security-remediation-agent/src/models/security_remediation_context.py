@@ -3,7 +3,6 @@ from typing import Any
 from dataclasses import field
 
 
-
 @dataclass
 class SecurityRemediationContext:
     total_vulnerabilities: int = 0

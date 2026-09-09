@@ -9,7 +9,7 @@ sys.modules.setdefault(
 
 from src.engines.policy_engine.package_relationship_lookup import PackageRelationshipLookup
 from src.models.security_package_triage import SecurityPackageTriage
-from src.tools.github_vulnerability_collector.model.vulnerability_alert import VulnerabilityAlert
+from src.tools.model.vulnerability_alert import VulnerabilityAlert
 
 
 class StubTool:

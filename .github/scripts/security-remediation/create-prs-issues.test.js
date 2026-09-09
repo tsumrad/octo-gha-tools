@@ -17,6 +17,12 @@ test('tracking issues group by ecosystem, major package or minor-patch, across s
     high: { plans: [plan('postcss', 'npm')] },
   } };
   raw.groups.high.plans[0].package.effective_severity = 'high';
+  const starlette = plan('starlette', 'pip');
+  starlette.package.relationship = 'transitive';
+  starlette.package.dependency_occurrences = [{ package: 'starlette', version: '0.50.0',
+    introducers: [{ package: 'fastapi', version: '0.125.0' },
+      { package: 'fastapi-sqlalchemy', version: '0.2.1' }] }];
+  raw.groups.medium.plans.push(starlette);
   const rollupPlans = [raw.groups.medium.plans[2], raw.groups.high.plans[0]];
   rollupPlans.forEach((p, index) => { p.action = { action_type: 'rollup_pr', pr_number: index + 10 }; });
   const branchResults = { branches: { 'npm--non-breaking-rollup': {
@@ -76,6 +82,10 @@ test('tracking issues group by ecosystem, major package or minor-patch, across s
   assert.equal(Object.keys(output.created_issues).length, 4);
   const minor = created.find(i => i.title === '[Security Remediation] [npm] [Minor-Patch] Vulnerability Remediation Tracking');
   assert.ok(minor);
+  const pipIssue = created.find(i => i.title.includes('[pip]'));
+  assert.ok(pipIssue.body.includes('Transitive dependency **starlette 0.50.0** is introduced via'));
+  assert.ok(pipIssue.body.includes('- fastapi 0.125.0 → starlette 0.50.0'));
+  assert.ok(pipIssue.body.includes('- fastapi-sqlalchemy 0.2.1 → starlette 0.50.0'));
   assert.match(minor.body, /Open security alerts \| 61/);
   assert.match(minor.body, /Open code scanning alerts \| 3/);
   assert.deepEqual(output.summary, remediationPlan.summary);

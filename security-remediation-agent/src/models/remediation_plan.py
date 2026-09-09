@@ -6,9 +6,9 @@ from enum import Enum
 from typing import Any
 from dataclasses import field
 
-from tools.github_pr_collector.model.pull_request_metadata import PullRequestMetadata
-from tools.github_vulnerability_collector.model.vulnerability_alert import VulnerabilityAlert
-from models.security_remediation_context import SecurityRemediationContext
+from src.tools.model.pull_request_metadata import PullRequestMetadata
+from src.tools.model.vulnerability_alert import VulnerabilityAlert
+from src.models.security_remediation_context import SecurityRemediationContext
 
 # ── Enums ──────────────────────────────────────────────────────────────────────
 
@@ -31,6 +31,8 @@ class CodingAgent(str, Enum):
 class PackageContext:
     name: str
     ecosystem: str
+    dependency_occurrences: list[dict[str, Any]] = field(default_factory=list)
+    introducer_pull_requests: list[dict[str, Any]] = field(default_factory=list)
     current_version: str | None = None
     relationship: str | None = None
     vulnerabilities: list[VulnerabilityAlert] = field(default_factory=list)

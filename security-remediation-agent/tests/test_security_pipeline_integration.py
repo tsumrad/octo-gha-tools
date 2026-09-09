@@ -21,10 +21,10 @@ from src.agents.vulnerability_collector_agent import VulnerabilityCollectorAgent
 from src.agents.vulnerability_triage_agent import VulnerabilityTriageAgent
 from src.engines.policy_engine import package_relationship_lookup as relationship_module
 from src.models.remediation_plan import ActionType
-from src.tools.github_vulnerability_collector.model.codescanning_alert import CodescanningAlert
-from src.tools.github_pr_collector.model.pull_request_metadata import PullRequestMetadata
-from src.tools.github_pr_collector.utils.version_bump_resolver import VersionBump
-from src.tools.github_vulnerability_collector.model.vulnerability_alert import VulnerabilityAlert
+from src.tools.model.codescanning_alert import CodescanningAlert
+from src.tools.model.pull_request_metadata import PullRequestMetadata
+from src.tools.utils.version_bump_resolver import VersionBump
+from src.tools.model.vulnerability_alert import VulnerabilityAlert
 
 
 class StubTool:

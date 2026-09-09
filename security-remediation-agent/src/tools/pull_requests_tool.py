@@ -7,12 +7,12 @@ import httpx
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-from ..github_vulnerability_collector.dependabot_alerts_tool import (
+from src.tools.dependabot_alerts_tool import (
     GITHUB_API_VERSION,
     PER_PAGE,
     get_next_link,
 )
-from .model.pull_request_metadata import PullRequestMetadata, build_pull_request_metadata
+from src.tools.model.pull_request_metadata import PullRequestMetadata, build_pull_request_metadata
 
 GitHubObject = dict[str, Any]
 
@@ -108,7 +108,7 @@ async def pull_requests_tool(
         if not pull_request.get("number"):
             continue
 
-        # user = (pull_request.get("user") or {}).get("login", "")
+        logger.info("Processing ss pull request #%d ", pull_request.get("number"))
         # if "bot" not in user.lower():
         #     continue
 

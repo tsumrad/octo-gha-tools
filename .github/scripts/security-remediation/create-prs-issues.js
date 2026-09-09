@@ -383,6 +383,40 @@ for (const [issueKey, group] of issueGroups) {
   body += `| Direct dependencies affected | ${directPlans.length} | ${directDepsStr} |\n`;
   body += `| Transitive dependencies affected | ${transitivePs.length} | ${transitiveDepsStr} |\n`;
 
+  const vulnerablePlans = group.plans.filter(plan => buildAlerts(plan).length > 0);
+  body += `\n## Issue Group Summary (${ecosystem})\n\n| Package | No. of Vulnerabilities | Severity | Direct/Transitive | Parent Packages | Pull Requests |\n|---|---|---|---|---|---|\n`;
+  for (const plan of vulnerablePlans) {
+    const alerts = buildAlerts(plan);
+    const numVulns = alerts.length;
+    const cvssValues = alerts.map(a => a.cvss).filter(v => v != null);
+    const maxCvss = cvssValues.length > 0 ? Math.max(...cvssValues) : null;
+    const severity = maxCvss != null
+      ? (maxCvss >= 9 ? 'Critical' : maxCvss >= 7 ? 'High' : maxCvss >= 4 ? 'Medium' : 'Low') + ` (${maxCvss})`
+      : '—';
+    const isTransitivePkg2 = (plan.package.relationship || '').toLowerCase() === 'transitive' || plan.package.is_transitive === true;
+    const depType = isTransitivePkg2 ? 'Transitive' : 'Direct';
+    const parents = plan.package.transitive_source_packages || plan.package.transitive_source_package || [];
+    const parentsStr = Array.isArray(parents) && parents.length ? parents.join(', ') : '—';
+    let prLinks = '—';
+    if (plan.action.pr_number) {
+      prLinks = `[#${plan.action.pr_number}](${plan.action.pull_url})`;
+    } else {
+      const cat = getCategory(plan);
+      const prInfo = groupPRs(cat);
+      if (Array.isArray(prInfo) && prInfo.length > 0) {
+        const uniq = [...new Map(prInfo.map(p => [p.number, p])).values()];
+        prLinks = uniq.map(p => `[#${p.number}](${p.url})`).join(', ');
+      } else if (prInfo && prInfo.url) {
+        prLinks = `[${prInfo.title}](${prInfo.url})`;
+      }
+    }
+    body += `| \`${plan.package.name}\` | ${numVulns} | ${severity} | ${depType} | ${parentsStr} | ${prLinks} |\n`;
+  }
+  if (vulnerablePlans.length === 0) {
+    body += `| _No vulnerable packages in this group_ | | | | | |\n`;
+  }
+  body += '\n';
+
   const rollupRows = [];
   for (const imp of ['non-breaking', 'breaking']) {
     for (const act of ['rollup', 'standalone', 'placeholder', 'open-issue']) {
@@ -473,6 +507,22 @@ for (const [issueKey, group] of issueGroups) {
         body += `### \`${plan.package.name}\`: \`${plan.package.current_version_range}\` -> \`${plan.fix.upgrade_version || plan.fix.non_breaking_fix || 'N/A'}\`\n\n`;
         body += `- **Remediation Status**: ${status}\n`;
         if (isTransitive) {
+          const parentPRs = plan.package.introducer_pull_requests || [];
+          if (parentPRs.length) {
+            body += '\n**Introducer upgrade PRs** (verify the resulting transitive version):\n\n';
+            for (const candidate of parentPRs) {
+              body += `- [#${candidate.pr_number}](${candidate.pull_url}): ${candidate.package} ${candidate.from_version} → ${candidate.to_version}\n`;
+            }
+            body += '\n';
+          }
+          for (const occurrence of plan.package.dependency_occurrences || []) {
+            body += `\nTransitive dependency **${occurrence.package} ${occurrence.version || 'unknown'}** is introduced via\n\n`;
+            for (const parent of occurrence.introducers || []) {
+              body += `- ${parent.package} ${parent.version || 'unknown'} → ${occurrence.package} ${occurrence.version || 'unknown'}\n`;
+            }
+            if (!(occurrence.introducers || []).length) body += '_No declared parent found in the lockfile._\n';
+            body += '\n';
+          }
           const srcList = Array.isArray(transitiveOf) ? transitiveOf.join(', ') : String(transitiveOf);
           body += `- **Dependency Type**: Transitive (pulled in by: \`${srcList}\`)\n`;
           const fixVer = plan.fix.non_breaking_fix || plan.fix.breaking_fix || plan.fix.upgrade_version;

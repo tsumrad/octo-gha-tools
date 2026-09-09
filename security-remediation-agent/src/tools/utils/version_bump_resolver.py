@@ -1,3 +1,4 @@
+from asyncio.log import logger
 import re
 
 from pydantic import BaseModel, Field
@@ -122,7 +123,7 @@ def _extract_renovate_body(body: str) -> list[VersionBump]:
     return results
 
 
-def extract_from_body(body: str) -> list[VersionBump]:
+def extract_from_body(category: str, body: str) -> list[VersionBump]:
     """Pull all package updates out of the PR body by updater type."""
     return _extract_dependabot_body(body) + _extract_renovate_body(body)
 
@@ -146,9 +147,13 @@ def extract_from_title(title: str) -> list[VersionBump]:
     return results
 
 
-def get_version_bumps(title: str, body: str) -> list[VersionBump]:
+def get_version_bumps(user: str, title: str, body: str) -> list[VersionBump]:
     """Return version bumps from the PR body, falling back to the title."""
-    bumps = extract_from_body(body)
+    logger.info(user)
+    category = "dependabot" if "dependabot" in user.lower() else "renovatebot"
+    bumps = extract_from_body(category, body)
+    logger.info(bumps)
     if bumps:
+        logger.info("return bumps")
         return bumps
     return extract_from_title(title)

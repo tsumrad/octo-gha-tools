@@ -4,8 +4,8 @@ from dataclasses import field
 
 from  ..models.remediation_plan import SummaryContext
 
-from ..tools.github_pr_collector.model.pull_request_metadata import PullRequestMetadata
-from ..tools.github_vulnerability_collector.model.vulnerability_alert import VulnerabilityAlert
+from src.tools.model.pull_request_metadata import PullRequestMetadata
+from src.tools.model.vulnerability_alert import VulnerabilityAlert
 
 
 @dataclass
@@ -24,6 +24,8 @@ class SecurityPackageTriage:
 
     # component relationship    
     transitive_source_package: list[str] = field(default_factory=list)
+    dependency_occurrences: list[dict[str, Any]] = field(default_factory=list)
+    introducer_pull_requests: list[dict[str, Any]] = field(default_factory=list)
     current_version: str = ""
     fixed_minimum_version: str = ""
     fixed_maximum_version: str = ""

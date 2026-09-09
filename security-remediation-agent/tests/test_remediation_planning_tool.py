@@ -5,8 +5,8 @@ import pytest
 
 from src.models.remediation_plan import ActionType, FixClass, RemediationPlan
 from src.models.security_package_triage import SecurityPackageTriage
-from src.tools.github_vulnerability_collector.model.vulnerability_alert import VulnerabilityAlert
-from src.tools.remediation_planning_assistant.remediation_planning_tool import (
+from src.tools.model.vulnerability_alert import VulnerabilityAlert
+from src.tools.remediation_planning_tool import (
     build_direct_plan,
     build_transitive_plan,
     derive_action_type,

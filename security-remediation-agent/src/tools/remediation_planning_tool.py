@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from packaging.version import Version, InvalidVersion
 from uuid_utils import uuid4
 
-from ...models.remediation_plan import (
+from src.models.remediation_plan import (
     ActionType,
     EcosystemContext,
     IssueContext,
@@ -17,8 +17,8 @@ from ...models.remediation_plan import (
     RemediationPlan,
     SummaryContext,
 )
-from ...models.security_package_triage import SecurityPackageTriage
-from ...tools.github_pr_collector.model.pull_request_metadata import PullRequestMetadata
+from src.models.security_package_triage import SecurityPackageTriage
+from src.tools.model.pull_request_metadata import PullRequestMetadata
 
 
 
@@ -48,6 +48,8 @@ def build_remediation_plan(
 def create_package_context(pkg: SecurityPackageTriage) -> PackageContext:
     return PackageContext(
         name=pkg.package,
+        dependency_occurrences=pkg.dependency_occurrences,
+        introducer_pull_requests=pkg.introducer_pull_requests,
         ecosystem=pkg.ecosystem,
         current_version=pkg.current_version,
         relationship="transitive" if pkg.istransitive else "direct",

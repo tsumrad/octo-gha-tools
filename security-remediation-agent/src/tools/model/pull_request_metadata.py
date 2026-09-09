@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 import logging
 from typing import Any
 
-from ..utils.version_bump_resolver import VersionBump, get_version_bumps
+from src.tools.utils.version_bump_resolver import VersionBump, get_version_bumps
 
 @dataclass
 class PullRequestMetadata:
@@ -73,6 +73,7 @@ def build_pull_request_metadata(
     return PullRequestMetadata.from_pull_request(
         pull_request=pull_request,
         version_bumps=get_version_bumps(
+            user.get("login", ""),
             pull_request.get("title", ""),
             pull_request.get("body", ""),
         ),
