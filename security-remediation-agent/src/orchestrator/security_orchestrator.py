@@ -58,6 +58,7 @@ class SecurityOrchestrator:
 
         # ── Step 3: Build remediation plans ────────────────────────────────────
         bundle = await self._plan(triage_result, remediation_context)
+        logger.info("Built %d remediation plans", len(bundle.remediation_plans))
         for plan in bundle.remediation_plans:
             logger.info("Remediation plan: %s (%d packages)", plan.ecosystem, len(plan.packages))
             for package in plan.packages:
