@@ -62,29 +62,104 @@ function normalizeGroupingName(name) {
   return withoutSubpath;
 }
 
-// Determines the package name used for issue grouping: for transitive
-// packages, always use a parent/introducer package; otherwise use the
-// package's own name. When multiple introducers exist, pick deterministically
-// (alphabetically) so packages sharing the same introducer set always group
-// together, regardless of array ordering in the source data.
-function getGroupingPackageName(plan) {
-  if (!isTransitivePlan(plan)) return plan.package.name;
-
+// Returns the full set of normalized parent/introducer package names for a
+// transitive plan (e.g. dependency_occurrences introducers, or
+// transitive_source_package entries). Used to detect overlap between
+// packages so they can be clustered into the same tracking issue.
+function getParentNames(plan) {
   const occurrences = plan.package.dependency_occurrences || [];
-  const introducerNames = [...new Set(occurrences.flatMap(occ => (occ.introducers || []).map(i => i.package)))]
-    .map(normalizeGroupingName).sort();
-  if (introducerNames.length > 0) return introducerNames[0];
+  const introducerNames = occurrences.flatMap(occ => (occ.introducers || []).map(i => i.package));
+  if (introducerNames.length > 0) {
+    return new Set(introducerNames.map(normalizeGroupingName));
+  }
 
   const sources = plan.package.transitive_source_packages || plan.package.transitive_source_package || [];
   if (sources.length > 0) {
-    const names = sources
-      .map(s => (s.includes('@') && s.lastIndexOf('@') > 0 ? s.slice(0, s.lastIndexOf('@')) : s))
-      .map(normalizeGroupingName)
-      .sort();
-    return names[0];
+    const names = sources.map(s => (s.includes('@') && s.lastIndexOf('@') > 0 ? s.slice(0, s.lastIndexOf('@')) : s));
+    return new Set(names.map(normalizeGroupingName));
   }
 
-  return normalizeGroupingName(plan.package.name);
+  return new Set();
+}
+
+// Union-Find (disjoint set) to cluster plans that share at least one parent
+// package, transitively. If A and B share a parent, and B and C share a
+// (possibly different) parent, A/B/C all end up in the same cluster.
+class UnionFind {
+  constructor() {
+    this.parent = new Map();
+  }
+  find(x) {
+    if (!this.parent.has(x)) this.parent.set(x, x);
+    let root = x;
+    while (this.parent.get(root) !== root) root = this.parent.get(root);
+    let cur = x;
+    while (this.parent.get(cur) !== root) {
+      const next = this.parent.get(cur);
+      this.parent.set(cur, root);
+      cur = next;
+    }
+    return root;
+  }
+  union(a, b) {
+    const ra = this.find(a);
+    const rb = this.find(b);
+    if (ra !== rb) this.parent.set(ra, rb);
+  }
+}
+
+// Clusters breaking/transitive plans within an ecosystem: any two plans that
+// share at least one normalized parent package name are merged into the same
+// cluster (transitively). Returns a Map from plan -> representative label,
+// where the label is the alphabetically-first parent name across the whole
+// cluster (for a stable, readable issue title).
+function clusterByParentOverlap(plans) {
+  const uf = new UnionFind();
+  const planParents = new Map();
+
+  plans.forEach((plan, idx) => {
+    const parents = getParentNames(plan);
+    planParents.set(idx, parents);
+    uf.find(idx);
+  });
+
+  // Union any two plans that share at least one parent name.
+  const parentToFirstPlanIdx = new Map();
+  plans.forEach((plan, idx) => {
+    for (const parent of planParents.get(idx)) {
+      if (parentToFirstPlanIdx.has(parent)) {
+        uf.union(idx, parentToFirstPlanIdx.get(parent));
+      } else {
+        parentToFirstPlanIdx.set(parent, idx);
+      }
+    }
+  });
+
+  // Build a readable label per cluster: alphabetically-first parent name
+  // among all plans in that cluster (or the plan's own name if it has none).
+  const clusterParents = new Map();
+  plans.forEach((plan, idx) => {
+    const root = uf.find(idx);
+    if (!clusterParents.has(root)) clusterParents.set(root, new Set());
+    const parents = planParents.get(idx);
+    if (parents.size > 0) {
+      for (const p of parents) clusterParents.get(root).add(p);
+    } else {
+      clusterParents.get(root).add(normalizeGroupingName(plan.package.name));
+    }
+  });
+
+  const clusterLabels = new Map();
+  for (const [root, parents] of clusterParents) {
+    clusterLabels.set(root, [...parents].sort()[0]);
+  }
+
+  const result = new Map();
+  plans.forEach((plan, idx) => {
+    const root = uf.find(idx);
+    result.set(plan, clusterLabels.get(root));
+  });
+  return result;
 }
 
 function getActionSuffix(plan) {
@@ -372,11 +447,31 @@ for (const [stubBranch, plans] of Object.entries(plansByStubBranch)) {
 const createdIssues = {};
 const issueGroups = new Map();
 
+// Group all plans by ecosystem first, then cluster breaking/transitive plans
+// within each ecosystem by parent-package overlap (transitively), so any
+// packages sharing a parent - directly or via a chain of shared parents -
+// land in the same tracking issue.
+const plansByEcosystem = new Map();
 for (const sourceGroup of Object.values(output)) {
   for (const plan of sourceGroup.plans || []) {
     const ecosystem = plan.package.ecosystem || 'unknown';
-    const upgradeGroup = getImpact(plan) === 'breaking'
-      ? `Major(${getGroupingPackageName(plan)})` : 'Minor-Patch';
+    if (!plansByEcosystem.has(ecosystem)) plansByEcosystem.set(ecosystem, []);
+    plansByEcosystem.get(ecosystem).push(plan);
+  }
+}
+
+for (const [ecosystem, ecosystemPlans] of plansByEcosystem) {
+  const breakingPlans = ecosystemPlans.filter(p => getImpact(p) === 'breaking');
+  const nonBreakingPlans = ecosystemPlans.filter(p => getImpact(p) !== 'breaking');
+
+  if (nonBreakingPlans.length > 0) {
+    const key = JSON.stringify([ecosystem, 'Minor-Patch']);
+    issueGroups.set(key, { ecosystem, upgradeGroup: 'Minor-Patch', plans: nonBreakingPlans });
+  }
+
+  const clusterLabels = clusterByParentOverlap(breakingPlans);
+  for (const plan of breakingPlans) {
+    const upgradeGroup = `Major(${clusterLabels.get(plan)})`;
     const key = JSON.stringify([ecosystem, upgradeGroup]);
     if (!issueGroups.has(key)) {
       issueGroups.set(key, { ecosystem, upgradeGroup, plans: [] });
