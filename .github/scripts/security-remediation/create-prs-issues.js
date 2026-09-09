@@ -358,30 +358,13 @@ for (const [issueKey, group] of issueGroups) {
       : prs;
   };
 
-  const nbPlans = group.plans.filter(p => p.fix.fix_class !== 'BREAKING_BUMP');
-  const bPlans = group.plans.filter(p => p.fix.fix_class === 'BREAKING_BUMP');
-  const isTransitivePkg = p => (p.package.relationship || '').toLowerCase() === 'transitive' || p.package.is_transitive === true;
-  const directPlans = group.plans.filter(p => !isTransitivePkg(p));
-  const transitivePs = group.plans.filter(isTransitivePkg);
-  const totalAlerts = group.plans.reduce((n, p) => n + (p.package.unique_ghsas || []).length, 0);
-  const title = `[Security Remediation] [${ecosystem}] [${upgradeGroup}] Vulnerability Remediation Tracking`;
+  const title = `[Security Remediation] [${ecosystem}] [${upgradeGroup}]`;
 
-  const uniqueDeps = arr => [...new Set(arr.map(p => p.package.name))].join(', ') || '—';
-  const allDepsStr = uniqueDeps(group.plans);
-  const directDepsStr = uniqueDeps(directPlans);
-  const transitiveDepsStr = uniqueDeps(transitivePs);
-  const nbDepsStr = uniqueDeps(nbPlans);
-  const bDepsStr = uniqueDeps(bPlans);
-
-  let body = `# [${ecosystem}] [${upgradeGroup}] Vulnerability Remediation Tracking\n\n`;
+  let body = `# [${ecosystem}] [${upgradeGroup}]\n\n`;
   body += `**Base Branch**: \`${BASE_BRANCH}\`\n`;
   body += `**Workflow Run**: [#${context.runId}](${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId})\n\n`;
 
   body += repositorySummaryMarkdown();
-  body += `## Issue Group Summary\n\n| Category | Count | Dependencies |\n|---|---|---|\n`;
-  body += `| Total security alerts | ${totalAlerts} | ${allDepsStr} |\n`;
-  body += `| Direct dependencies affected | ${directPlans.length} | ${directDepsStr} |\n`;
-  body += `| Transitive dependencies affected | ${transitivePs.length} | ${transitiveDepsStr} |\n`;
 
   const vulnerablePlans = group.plans.filter(plan => buildAlerts(plan).length > 0);
   body += `\n## Issue Group Summary (${ecosystem})\n\n| Package | No. of Vulnerabilities | Severity | Direct/Transitive | Parent Packages | Pull Requests |\n|---|---|---|---|---|---|\n`;
