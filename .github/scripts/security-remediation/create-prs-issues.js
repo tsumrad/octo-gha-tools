@@ -395,7 +395,13 @@ for (const [issueKey, group] of issueGroups) {
       : '—';
     const isTransitivePkg2 = (plan.package.relationship || '').toLowerCase() === 'transitive' || plan.package.is_transitive === true;
     const depType = isTransitivePkg2 ? 'Transitive' : 'Direct';
-    const parents = plan.package.transitive_source_packages || plan.package.transitive_source_package || [];
+    const occurrences = plan.package.dependency_occurrences || [];
+    const introducerNames = [...new Set(
+      occurrences.flatMap(occ => (occ.introducers || []).map(i => i.package))
+    )];
+    const parents = introducerNames.length
+      ? introducerNames
+      : (plan.package.transitive_source_packages || plan.package.transitive_source_package || []);
     const parentsStr = Array.isArray(parents) && parents.length ? parents.join(', ') : '—';
     let prLinks = '—';
     if (plan.action.pr_number) {
