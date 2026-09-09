@@ -73,11 +73,3 @@ class RemediationPlan:
     summary: SummaryContext | None = None
     remediation_plans:    list[IssueContext] = field(default_factory=list)
 
-
-@dataclass
-class RemediationPlanBundle:
-    action_type: ActionType | None = None
-    coding_agent: CodingAgent | None = None
-    remediation_plans: list[RemediationPlan] = field(default_factory=list)
-    summary: SummaryContext | None = None
-    remediation_plans:    list[IssueContext] = field(default_factory=list)

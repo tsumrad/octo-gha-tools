@@ -50,6 +50,38 @@ function getImpact(plan) {
   return plan.fix.fix_class === 'BREAKING_BUMP' ? 'breaking' : 'non-breaking';
 }
 
+function isTransitivePlan(plan) {
+  return (plan.package.relationship || '').toLowerCase() === 'transitive' || plan.package.is_transitive === true;
+}
+
+// Strips scope/subpath noise from a package name for grouping purposes.
+// e.g. "@vue/cli-service" -> "@vue", "some-pkg/sub" -> "some-pkg".
+function normalizeGroupingName(name) {
+  if (!name) return name;
+  const withoutSubpath = name.includes('/') ? name.slice(0, name.indexOf('/')) : name;
+  return withoutSubpath;
+}
+
+// Determines the package name used for issue grouping: for transitive
+// packages, always use the (first) parent/introducer package; otherwise use
+// the package's own name.
+function getGroupingPackageName(plan) {
+  if (!isTransitivePlan(plan)) return plan.package.name;
+
+  const occurrences = plan.package.dependency_occurrences || [];
+  const introducerNames = occurrences.flatMap(occ => (occ.introducers || []).map(i => i.package));
+  if (introducerNames.length > 0) return normalizeGroupingName(introducerNames[0]);
+
+  const sources = plan.package.transitive_source_packages || plan.package.transitive_source_package || [];
+  if (sources.length > 0) {
+    const [first] = sources;
+    const name = first.includes('@') && first.lastIndexOf('@') > 0 ? first.slice(0, first.lastIndexOf('@')) : first;
+    return normalizeGroupingName(name);
+  }
+
+  return normalizeGroupingName(plan.package.name);
+}
+
 function getActionSuffix(plan) {
   return ACTION_TYPE_TO_SUFFIX[plan.action.action_type] || 'open-issue';
 }
@@ -339,7 +371,7 @@ for (const sourceGroup of Object.values(output)) {
   for (const plan of sourceGroup.plans || []) {
     const ecosystem = plan.package.ecosystem || 'unknown';
     const upgradeGroup = getImpact(plan) === 'breaking'
-      ? `Major(${plan.package.name})` : 'Minor-Patch';
+      ? `Major(${getGroupingPackageName(plan)})` : 'Minor-Patch';
     const key = JSON.stringify([ecosystem, upgradeGroup]);
     if (!issueGroups.has(key)) {
       issueGroups.set(key, { ecosystem, upgradeGroup, plans: [] });
