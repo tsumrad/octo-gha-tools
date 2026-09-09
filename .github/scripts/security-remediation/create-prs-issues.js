@@ -403,19 +403,24 @@ for (const [issueKey, group] of issueGroups) {
       ? introducerNames
       : (plan.package.transitive_source_packages || plan.package.transitive_source_package || []);
     const parentsStr = Array.isArray(parents) && parents.length ? parents.join(', ') : '—';
-    let prLinks = '—';
+
+    const prMap = new Map();
     if (plan.action.pr_number) {
-      prLinks = `[#${plan.action.pr_number}](${plan.action.pull_url})`;
-    } else {
-      const cat = getCategory(plan);
-      const prInfo = groupPRs(cat);
-      if (Array.isArray(prInfo) && prInfo.length > 0) {
-        const uniq = [...new Map(prInfo.map(p => [p.number, p])).values()];
-        prLinks = uniq.map(p => `[#${p.number}](${p.url})`).join(', ');
-      } else if (prInfo && prInfo.url) {
-        prLinks = `[${prInfo.title}](${prInfo.url})`;
-      }
+      prMap.set(plan.action.pr_number, plan.action.pull_url);
     }
+    const cat = getCategory(plan);
+    const prInfo = groupPRs(cat);
+    if (Array.isArray(prInfo)) {
+      for (const p of prInfo) if (p && p.number) prMap.set(p.number, p.url);
+    } else if (prInfo && prInfo.url) {
+      prMap.set(prInfo.title, prInfo.url);
+    }
+    for (const p of [...(plan.package.pull_requests || []), ...(plan.package.introducer_pull_requests || [])]) {
+      if (p && p.pr_number) prMap.set(p.pr_number, p.pull_url || '');
+    }
+    const prLinks = prMap.size > 0
+      ? [...prMap.entries()].map(([num, url]) => `[#${num}](${url})`).join(', ')
+      : '—';
     body += `| \`${plan.package.name}\` | ${numVulns} | ${severity} | ${depType} | ${parentsStr} | ${prLinks} |\n`;
   }
   if (vulnerablePlans.length === 0) {

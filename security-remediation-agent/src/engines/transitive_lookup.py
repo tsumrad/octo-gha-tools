@@ -55,6 +55,8 @@ class TransitiveLookup:
                     occurrence = {**occurrence, "manifest_path": lock_path}
                     if occurrence not in item.dependency_occurrences:
                         item.dependency_occurrences.append(occurrence)
+                    if occurrence.get("version") and not item.current_version:
+                        item.current_version = occurrence["version"]
                     for parent in occurrence["introducers"]:
                         source = f"{parent['package']}@{parent['version']}"
                         if source not in item.transitive_source_package:
