@@ -1,13 +1,15 @@
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from src.agents.vulnerability_triage_agent import VulnerabilityTriageAgent
 from src.models.security_package_triage import SecurityPackageTriage
 from src.engines.relationship_resolver.npm_resolver import NpmResolver
+from src.engines.version_resolver.pip_parent_version_resolver import ParentResolution
 
 
-class IntroducerPRTest(unittest.TestCase):
-    def test_follow_redirects_matches_both_scoped_and_unscoped_introducers(self):
+class IntroducerPRTest(unittest.IsolatedAsyncioTestCase):
+    async def test_follow_redirects_matches_both_scoped_and_unscoped_introducers(self):
         resolver = NpmResolver({"packages": {
             "": {"dependencies": {"@vue/cli-service": "4.5.19", "axios": "0.28.1"}},
             "node_modules/@vue/cli-service": {"version": "4.5.19", "dependencies": {"webpack-dev-server": "3.11.3"}},
@@ -26,7 +28,7 @@ class IntroducerPRTest(unittest.TestCase):
                    pr(11, "axios", "0.28.1", "1.7.9"), pr(12, "unrelated", "1.0", "2.0")]
         agent = VulnerabilityTriageAgent()
         lookup = agent.group_pull_requests_by_package(parents)
-        agent.populate_remediation_version(item, [], lookup)
+        await agent.populate_remediation_version(item, [], lookup)
         self.assertEqual({p["package"] for p in item.dependency_occurrences[0]["introducers"]},
                          {"@vue/cli-service", "axios"})
         self.assertEqual([p["pr_number"] for p in item.introducer_pull_requests], [10, 11])
@@ -35,10 +37,10 @@ class IntroducerPRTest(unittest.TestCase):
         self.assertEqual(item.pull_request_metadata, [])
         # Also exercise the version-suffixed source fallback, without resolver occurrences.
         item.dependency_occurrences = []
-        agent.populate_remediation_version(item, [], lookup)
+        await agent.populate_remediation_version(item, [], lookup)
         self.assertEqual([p["pr_number"] for p in item.introducer_pull_requests], [10, 11])
 
-    def test_parent_candidates_do_not_overwrite_child_versions(self):
+    async def test_parent_candidates_do_not_overwrite_child_versions(self):
         agent = VulnerabilityTriageAgent()
         item = SecurityPackageTriage("starlette", "<0.50", "0.50.0", ecosystem="pip", istransitive=True)
         item.dependency_occurrences = [{"introducers": [{"package": "fastapi"}]}]
@@ -51,17 +53,53 @@ class IntroducerPRTest(unittest.TestCase):
         other = pr(2, "FastAPI_SQLAlchemy", "0.2.0", "0.2.1")
         unrelated = pr(3, "requests", "2.0", "2.1")
         lookup = {"fastapi": [parent, parent], "fastapi_sqlalchemy": [other], "requests": [unrelated]}
-        agent.populate_remediation_version(item, [], lookup)
+        await agent.populate_remediation_version(item, [], lookup)
         self.assertEqual([p["pr_number"] for p in item.introducer_pull_requests], [1, 2])
         self.assertEqual(item.fixed_minimum_version, "0.50.0")
         self.assertFalse(item.is_pull_available)
         child = pr(4, "starlette", "0.49.0", "0.50.0")
-        agent.populate_remediation_version(item, [child], lookup)
+        await agent.populate_remediation_version(item, [child], lookup)
         self.assertEqual(item.pull_request_metadata, [child])
         self.assertEqual(item.current_version, "0.49.0")
         self.assertEqual(len(item.introducer_pull_requests), 2)
 
-    def test_direct_packages_do_not_match_parent_prs(self):
+    async def test_direct_packages_do_not_match_parent_prs(self):
         item = SecurityPackageTriage("starlette", "<0.50", "0.50.0")
-        VulnerabilityTriageAgent().populate_remediation_version(item, [])
+        await VulnerabilityTriageAgent().populate_remediation_version(item, [])
+        self.assertEqual(item.introducer_pull_requests, [])
+
+    async def test_transitive_pip_without_pr_uses_verified_parent_version(self):
+        agent = VulnerabilityTriageAgent()
+        agent.pip_parent_version_resolver.resolve = AsyncMock(return_value=ParentResolution(
+            parent="fastapi", child="starlette", resolved_version="0.125.0",
+            installed_child_version="0.50.0", candidates_considered=["0.125.0"],
+        ))
+        item = SecurityPackageTriage("starlette", "<0.50", "0.50.0", ecosystem="pip", istransitive=True)
+        item.dependency_occurrences = [{"introducers": [{"package": "fastapi", "version": "0.124.0"}]}]
+
+        await agent.populate_remediation_version(item, [])
+
+        agent.pip_parent_version_resolver.resolve.assert_awaited_once_with(
+            "fastapi", "starlette", "0.50.0", current_parent_version="0.124.0",
+        )
+        self.assertEqual(item.fixed_minimum_version, "0.125.0")
+        self.assertEqual(item.fixed_maximum_version, "0.125.0")
+        self.assertEqual(item.upgrade_to_version, "0.125.0")
+        self.assertEqual(item.introducer_pull_requests, [{
+            "package": "fastapi", "from_version": "0.124.0", "to_version": "0.125.0",
+            "requires_verification": False, "source": "pypi_verified",
+        }])
+
+    async def test_transitive_pip_without_pr_or_verified_candidate_falls_back_to_child_version(self):
+        agent = VulnerabilityTriageAgent()
+        agent.pip_parent_version_resolver.resolve = AsyncMock(return_value=ParentResolution(
+            parent="fastapi", child="starlette", candidates_considered=["0.125.0"],
+        ))
+        item = SecurityPackageTriage("starlette", "<0.50", "0.50.0", ecosystem="pip", istransitive=True)
+        item.dependency_occurrences = [{"introducers": [{"package": "fastapi", "version": "0.124.0"}]}]
+
+        await agent.populate_remediation_version(item, [])
+
+        self.assertEqual(item.fixed_minimum_version, "0.50.0")
+        self.assertEqual(item.fixed_maximum_version, "0.50.0")
         self.assertEqual(item.introducer_pull_requests, [])

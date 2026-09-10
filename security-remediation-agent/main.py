@@ -88,11 +88,11 @@ async def async_main() -> None:
     for pkg in result.remediation_plans:
         logging.getLogger(__name__).info("Remediation plan: %s (%d packages)", pkg.ecosystem, len(pkg.packages))
         for package in pkg.packages:
-           if package.name == "follow-redirects":
+           if package.name == "starlette":
                 logging.getLogger(__name__).info(package)
             #logging.getLogger(__name__).info("  Package: %s (%d vulnerabilities, %d pull requests, %s)", package.name, len(package.vulnerabilities), len(package.pull_requests), package.relationship)
     # stdout is the workflow's JSON interface, including when no packages need remediation.
-    print(json.dumps(to_jsonable(result), indent=2, sort_keys=True))
+    #print(json.dumps(to_jsonable(result), indent=2, sort_keys=True))
 
 
 def normalize_duplicated_invocation(argv: list[str]) -> list[str]:

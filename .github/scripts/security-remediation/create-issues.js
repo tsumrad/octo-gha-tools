@@ -283,7 +283,7 @@ function buildTransitiveDetails(plan) {
   }
   const transitiveOf = plan.package.transitive_source_packages || plan.package.transitive_source_package || [];
   const srcList = Array.isArray(transitiveOf) ? transitiveOf.join(', ') : String(transitiveOf);
-  details += `- **Dependency Type**: Transitive (pulled in by: \`${srcList}\`)\n`;
+  details += `- **Dependency Type**: Transitive \n`;
   const fixVer = plan.fix.non_breaking_fix || plan.fix.breaking_fix || plan.fix.upgrade_version;
   if (fixVer) details += `- **Required Action**: Bump \`${plan.action.target_package}\` to \`>= ${fixVer}\`\n`;
   const mdNote = plan.action.placeholder_markdown || '';
