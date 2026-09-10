@@ -181,14 +181,6 @@ function parentPackagesOf(plan) {
   return Array.isArray(parents) && parents.length ? parents.join(', ') : '—';
 }
 
-function currentVersion(plan) {
-  return plan.package.current_version || '—';
-}
-
-function fixedVersion(plan) {
-  return plan.package.upgrade_to_version || '—';
-}
-
 function pullRequestLinksOf(plan) {
   const prMap = new Map();
   if (plan.action.pr_number) {
@@ -204,7 +196,7 @@ function pullRequestLinksOf(plan) {
 function buildIssueGroupSummarySection(ecosystem, plans) {
   const vulnerablePlans = plans.filter(plan => buildAlerts(plan).length > 0);
   let section = `\n## Issue Group Summary (${ecosystem})\n\n`;
-  section += `| Package | No. of Vulnerabilities | Severity | Direct/Transitive | Parent Packages | From Version | To Version | Pull Requests |\n|---|---|---|---|---|---|---|---|\n`;
+  section += `| Package | No. of Vulnerabilities | Severity | Direct/Transitive | Parent Packages | Pull Requests |\n|---|---|---|---|---|---|\n`;
 
   if (vulnerablePlans.length === 0) {
     section += `| _No vulnerable packages in this group_ | | | | | |\n\n`;
@@ -214,7 +206,7 @@ function buildIssueGroupSummarySection(ecosystem, plans) {
   for (const plan of vulnerablePlans) {
     const alerts = buildAlerts(plan);
     const depType = isTransitivePlan(plan) ? 'Transitive' : 'Direct';
-    section += `| \`${plan.package.name}\` | ${alerts.length} | ${severityLabel(alerts)} | ${depType} | ${parentPackagesOf(plan)} | ${currentVersion(plan)} | ${fixedVersion(plan)} | ${pullRequestLinksOf(plan)} |\n`;
+    section += `| \`${plan.package.name}\` | ${alerts.length} | ${severityLabel(alerts)} | ${depType} | ${parentPackagesOf(plan)} | ${pullRequestLinksOf(plan)} |\n`;
   }
   return section + '\n';
 }
