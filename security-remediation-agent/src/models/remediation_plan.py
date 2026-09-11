@@ -64,7 +64,25 @@ class EcosystemContext:
     direct_vulnerabile_packages: list[str] = field(default_factory=list)
     transitive_vulnerabile_packages: list[str] = field(default_factory=list)
 
+
+@dataclass
+class ImplementationPackage:
+    package_name: str = ""
+    impacted_version_str: str = ""
+    fixed_version: str = ""
+    is_pull_available: bool = False
+    pull_requests: list[PullRequestMetadata] = field(default_factory=list)
+
+
+@dataclass
+class ImplementationPlan:
+    package_name: str = ""
+    impacted_version_str: str = ""
+    relationship: str | None = None
+    introducer_pull_requests: list[dict[str, Any]] = field(default_factory=list)
+
 # ── Main model ─────────────────────────────────────────────────────────────────
+
 
 @dataclass
 class RemediationPlan:
@@ -72,4 +90,3 @@ class RemediationPlan:
     created_at: datetime
     summary: SummaryContext | None = None
     remediation_plans:    list[IssueContext] = field(default_factory=list)
-
