@@ -83,8 +83,10 @@ fi
 {
 	echo "### Vulnerability Categories"
 	echo
-	echo "| Severity | No. of Vulnerabilities |"
-	echo "|----------|:-----------------------:|"
+	echo "| Critical | High | Medium | Low | Others |"
+	echo "|:--------:|:----:|:------:|:---:|:------:|"
+	echo "| $summary.vulnerabilities_summary.critical | $summary.vulnerabilities_summary.high | $summary.vulnerabilities_summary.medium | $summary.vulnerabilities_summary.low | $summary.vulnerabilities_summary.others |"
+
 } >>"$GITHUB_STEP_SUMMARY"
 
 for sev in critical high medium low; do
