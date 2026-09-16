@@ -94,6 +94,25 @@ async def test_get_codescanning_alerts_fetches_open_alerts_with_link_pagination(
     ]
 
 
+@pytest.mark.asyncio
+async def test_get_codescanning_alerts_treats_404_as_no_alerts(monkeypatch):
+    # GitHub returns 404 (instead of an empty list) when code scanning is not
+    # enabled for a repository. That must not crash the whole orchestration -
+    # treat it the same as "zero code scanning alerts".
+    class NotEnabledStubAsyncClient(StubAsyncClient):
+        async def get(self, url, params):
+            type(self).requests.append({"url": url, "params": params})
+            return StubResponse({"message": "no analysis found"}, status_code=404)
+
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setattr(tool_module.httpx, "AsyncClient", NotEnabledStubAsyncClient)
+    NotEnabledStubAsyncClient.requests = []
+
+    alerts = await get_codescanning_alerts("octo-org", "octo-repo")
+
+    assert alerts == []
+
+
 def test_filter_codescanning_alerts_keeps_open_language_specific_package_vulnerabilities():
     alerts = filter_codescanning_alerts(
         [
