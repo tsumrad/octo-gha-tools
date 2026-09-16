@@ -29,6 +29,22 @@ function isBreakablePackage(remediationPackage) {
   return ownPackageContexts(remediationPackage).some(pkg => pkg.isbreakable === true);
 }
 
+// A vulnerability alert (GHSA/CVE) can be attached to more than one
+// PackageContext for the same remediation package - e.g. once per lockfile
+// manifest path it resolves at - so dedupe by advisory identity before it
+// feeds severity/advisory computation downstream.
+function dedupeVulnerabilities(vulnerabilities) {
+  const seen = new Set();
+  const deduped = [];
+  for (const vulnerability of vulnerabilities) {
+    const key = (vulnerability.ghsa_id || vulnerability.cve_id || vulnerability.url || JSON.stringify(vulnerability)).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(vulnerability);
+  }
+  return deduped;
+}
+
 function prepareOutput(raw, severities = 'critical,high,medium,low') {
   if (!raw || !Array.isArray(raw.remediation_plan_bundles)) {
     throw new Error('Expected orchestrator RemediationPlan.remediation_plan_bundles array');
@@ -41,7 +57,7 @@ function prepareOutput(raw, severities = 'critical,high,medium,low') {
   for (const [bundleIndex, bundle] of raw.remediation_plan_bundles.entries()) {
     const bundleEcosystem = bundle.ecosystem || 'unknown';
     for (const [packageIndex, pkg] of (bundle.packages || []).entries()) {
-      const vulnerabilities = (pkg.packages || []).flatMap(p => p.vulnerabilities || []);
+      const vulnerabilities = dedupeVulnerabilities((pkg.packages || []).flatMap(p => p.vulnerabilities || []));
       const severity = SEVERITIES.find(s => vulnerabilities.some(v => normalizeSeverity(v.severity) === s))
         || normalizeSeverity(bundle.severity) || 'unknown';
       if (!selected.has(severity)) continue;

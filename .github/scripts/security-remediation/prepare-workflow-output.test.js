@@ -81,6 +81,25 @@ test('a direct package stays direct even when it also introduces an unrelated tr
   assert.equal(plan.package.relationship, 'direct');
 });
 
+test('deduplicates the same vulnerability alert reported across multiple merged PackageContext entries', () => {
+  // cross-spawn can be installed at several nested node_modules locations in
+  // one lockfile, each producing its own PackageContext/occurrence carrying
+  // the same GHSA alert. These must collapse to a single vulnerability row
+  // instead of appearing once per nested copy.
+  const raw = { plan_id: 'plan', remediation_plan_bundles: [{ groupName: 'grp', ecosystem: 'npm', packages: [
+    { remediation_package: 'cross-spawn', ecosystem: 'npm', current_version: '6.0.5', remediation_version: '7.0.5',
+      packages: [
+        { name: 'cross-spawn', relationship: 'transitive',
+          vulnerabilities: [{ severity: 'high', ghsa_id: 'GHSA-xxxx-xxxx-xxxx', package: 'cross-spawn' }] },
+        { name: 'cross-spawn', relationship: 'transitive',
+          vulnerabilities: [{ severity: 'high', ghsa_id: 'GHSA-xxxx-xxxx-xxxx', package: 'cross-spawn' }] },
+      ] },
+  ] }] };
+  const [plan] = prepareOutput(raw).groups.high.plans;
+  assert.equal(plan.package.vulnerabilities.length, 1);
+  assert.deepEqual(plan.package.unique_ghsas, ['GHSA-xxxx-xxxx-xxxx']);
+});
+
 test('accepts empty plans and rejects missing output or invalid severity', () => {
   assert.deepEqual(prepareOutput({ remediation_plan_bundles: [] }), { groups: {} });
   assert.throws(() => prepareOutput(null), /RemediationPlan/);
