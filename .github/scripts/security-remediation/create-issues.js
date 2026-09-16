@@ -181,32 +181,48 @@ function parentPackagesOf(plan) {
   return Array.isArray(parents) && parents.length ? parents.join(', ') : '—';
 }
 
-function pullRequestLinksOf(plan) {
-  const prMap = new Map();
-  if (plan.action.pr_number) {
-    prMap.set(plan.action.pr_number, plan.action.pull_url);
-  }
-  for (const p of [...(plan.package.pull_requests || []), ...(plan.package.introducer_pull_requests || [])]) {
-    if (p && p.pr_number) prMap.set(p.pr_number, p.pull_url || '');
-  }
-  if (prMap.size === 0) return '—';
-  return [...prMap.entries()].map(([num, url]) => `[#${num}](${url})`).join(', ');
+// The vulnerable package name(s) as reported by the underlying vulnerability
+// alerts, rather than the remediation/bundle package name (which for
+// transitive plans is the resolved upgrade target, not the vulnerable one).
+function vulnerablePackageNamesOf(plan, alerts) {
+  const names = [...new Set(alerts.map(a => a.package).filter(Boolean))];
+  return names.length ? names : [plan.package.name];
 }
 
 function buildIssueGroupSummarySection(ecosystem, plans) {
   const vulnerablePlans = plans.filter(plan => buildAlerts(plan).length > 0);
   let section = `\n## Issue Group Summary (${ecosystem})\n\n`;
-  section += `| Package | No. of Vulnerabilities | Severity | Direct/Transitive | Parent Packages | Pull Requests |\n|---|---|---|---|---|---|\n`;
+  section += `| Package | No. of Vulnerabilities | Severity | Direct/Transitive | Parent Packages |\n|---|---|---|---|---|\n`;
 
   if (vulnerablePlans.length === 0) {
-    section += `| _No vulnerable packages in this group_ | | | | | |\n\n`;
+    section += `| _No vulnerable packages in this group_ | | | | |\n\n`;
     return section;
   }
 
   for (const plan of vulnerablePlans) {
     const alerts = buildAlerts(plan);
     const depType = isTransitivePlan(plan) ? 'Transitive' : 'Direct';
-    section += `| \`${plan.package.name}\` | ${alerts.length} | ${severityLabel(alerts)} | ${depType} | ${parentPackagesOf(plan)} | ${pullRequestLinksOf(plan)} |\n`;
+    const packageNames = vulnerablePackageNamesOf(plan, alerts).map(name => `\`${name}\``).join(', ');
+    section += `| ${packageNames} | ${alerts.length} | ${severityLabel(alerts)} | ${depType} | ${parentPackagesOf(plan)} |\n`;
+  }
+  return section + '\n';
+}
+
+// ── Acceptance criteria section (checkbox per bundle package) ───────────────
+
+function buildAcceptanceCriteriaSection(plans) {
+  const vulnerablePlans = plans.filter(plan => buildAlerts(plan).length > 0);
+  let section = `## Acceptance Criteria\n\n`;
+
+  if (vulnerablePlans.length === 0) {
+    section += `_No vulnerable packages in this group_\n\n`;
+    return section;
+  }
+
+  for (const plan of vulnerablePlans) {
+    const currentVersion = plan.package.current_version || 'unknown';
+    const remediationVersion = plan.fix.upgrade_version || '—';
+    section += `- [ ] Upgrade \`${plan.package.name}\` from \`${currentVersion}\` to \`${remediationVersion}\`\n`;
   }
   return section + '\n';
 }
@@ -403,6 +419,7 @@ function buildIssueBody(ecosystem, upgradeGroup, group, categoryMap, groupPRs) {
   body += `**Workflow Run**: [#${context.runId}](${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId})\n\n`;
   body += repositorySummaryMarkdown();
   body += buildIssueGroupSummarySection(ecosystem, group.plans);
+  body += buildAcceptanceCriteriaSection(group.plans);
 
   const groupPlansSet = new Set(group.plans);
   body += buildRemediationPRsSection(ecosystem, categoryMap, groupPlansSet, groupPRs);
