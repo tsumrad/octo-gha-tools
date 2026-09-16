@@ -138,3 +138,56 @@ test('creates one tracking issue per package bundle when bundle metadata is pres
   assert.match(cssToolsIssue.body, /`node-sass`/);
   assert.equal(output.stats.total_issues_created, 2);
 });
+
+test('Summary section is renamed and shows a severity count table (critical/high/medium/low)', async () => {
+  const alert = (cvss, ghsaSuffix) => ({
+    ghsa_id: `GHSA-${ghsaSuffix}`, cve_id: null, url: `https://github.com/advisories/GHSA-${ghsaSuffix}`,
+    summary: 'test vuln', cvss, vulnerable_range: '<1.0.0', first_patched: '1.0.0',
+  });
+  const plan = {
+    package: {
+      name: 'lodash', ecosystem: 'npm', effective_severity: 'critical',
+      unique_ghsas: [], current_version_range: '1.0.0',
+      vulnerabilities: [
+        alert(9.8, 'aaaa-1111-1111'), // Critical
+        alert(7.5, 'bbbb-2222-2222'), // High
+        alert(7.2, 'cccc-3333-3333'), // High
+        alert(4.0, 'dddd-4444-4444'), // Medium
+        alert(2.0, 'eeee-5555-5555'), // Low
+      ],
+    },
+    fix: { fix_class: 'NON_BREAKING_BUMP' },
+    action: { action_type: 'open_issue' }, state: {},
+  };
+  const raw = { groups: { critical: { plans: [plan] } } };
+  const remediationPlan = { summary: { context: {
+    total_vulnerabilities: 5, total_code_scanning_alerts: 0,
+    total_reviewed_prs: 0, total_ignored_prs: 0, total_remediation_prs: 0,
+  } } };
+  const created = [];
+  let output;
+  const github = { rest: {
+    search: { issuesAndPullRequests: async () => ({ data: { items: [] } }) },
+    issues: {
+      getLabel: async () => ({}), setLabels: async () => ({}), addLabels: async () => ({}),
+      update: async () => {},
+      create: async args => { created.push(args); return { data: { number: created.length, html_url: 'https://example.test/issue' } }; },
+    },
+  } };
+  const fakeFs = {
+    readFileSync: file => JSON.stringify(file === 'orchestrator-output.json' ? remediationPlan : raw),
+    existsSync: () => true,
+    writeFileSync: (file, data) => { output = JSON.parse(data); },
+  };
+  await new AsyncFunction('github', 'context', 'core', 'require', 'process', 'console', source)(
+    github, { repo: { owner: 'owner', repo: 'repo' }, serverUrl: 'https://github.com', runId: 1 },
+    { info() {}, warning(message) { throw new Error(message); } },
+    name => { assert.equal(name, 'fs'); return fakeFs; }, { env: { BASE_BRANCH: 'main' } }, console,
+  );
+
+  const body = created[0].body;
+  assert.match(body, /## Summary\n/);
+  assert.doesNotMatch(body, /## Repository Summary/);
+  assert.match(body, /\| Critical \| High \| Medium \| Low \|/);
+  assert.match(body, /\| 1 \| 2 \| 1 \| 1 \|/);
+});

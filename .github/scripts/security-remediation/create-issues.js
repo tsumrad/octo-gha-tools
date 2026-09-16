@@ -150,7 +150,28 @@ async function findIssue(title) {
 
 // ── Repository summary section ──────────────────────────────────────────────
 
-function repositorySummaryMarkdown() {
+const SEVERITY_BUCKETS = ['Critical', 'High', 'Medium', 'Low'];
+
+// Same CVSS thresholds used by severityLabel(), applied per-alert so counts
+// bucket consistently with the per-package Severity column below.
+function severityBucketOf(alert) {
+  const cvss = alert.cvss;
+  if (cvss == null) return null;
+  return cvss >= 9 ? 'Critical' : cvss >= 7 ? 'High' : cvss >= 4 ? 'Medium' : 'Low';
+}
+
+function severityCounts(plans) {
+  const counts = { Critical: 0, High: 0, Medium: 0, Low: 0 };
+  for (const plan of plans) {
+    for (const alert of buildAlerts(plan)) {
+      const bucket = severityBucketOf(alert);
+      if (bucket) counts[bucket] += 1;
+    }
+  }
+  return counts;
+}
+
+function repositorySummaryMarkdown(plans) {
   const metrics = [
     ['Open security alerts', 'total_vulnerabilities'],
     ['Open code scanning alerts', 'total_code_scanning_alerts'],
@@ -158,8 +179,14 @@ function repositorySummaryMarkdown() {
     ['PRs matched (used as remediation)', 'total_remediation_prs'],
     ['PRs ignored (no matching finding)', 'total_ignored_prs'],
   ];
-  return '## Repository Summary\n\n| Metric | Value |\n|---|---|\n' +
+  let section = '## Summary\n\n| Metric | Value |\n|---|---|\n' +
     metrics.map(([label, key]) => `| ${label} | ${summaryContext[key] ?? 0} |`).join('\n') + '\n\n';
+
+  const counts = severityCounts(plans);
+  section += `| ${SEVERITY_BUCKETS.join(' | ')} |\n` +
+    `|${SEVERITY_BUCKETS.map(() => '---').join('|')}|\n` +
+    `| ${SEVERITY_BUCKETS.map(bucket => counts[bucket]).join(' | ')} |\n\n`;
+  return section;
 }
 
 // ── Issue group summary section (per-package overview table) ───────────────
@@ -439,7 +466,7 @@ function buildIssueBody(ecosystem, upgradeGroup, group, categoryMap, groupPRs) {
   let body = `# [${ecosystem}] [${upgradeGroup}]\n\n`;
   body += `**Base Branch**: \`${BASE_BRANCH}\`\n`;
   body += `**Workflow Run**: [#${context.runId}](${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId})\n\n`;
-  body += repositorySummaryMarkdown();
+  body += repositorySummaryMarkdown(group.plans);
   body += buildIssueGroupSummarySection(ecosystem, group.plans);
   body += buildAcceptanceCriteriaSection(group.plans);
 
