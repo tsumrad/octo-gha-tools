@@ -184,9 +184,31 @@ function parentPackagesOf(plan) {
 // The vulnerable package name(s) as reported by the underlying vulnerability
 // alerts, rather than the remediation/bundle package name (which for
 // transitive plans is the resolved upgrade target, not the vulnerable one).
+// Deduplicated case-insensitively since the same package can be reported
+// with inconsistent casing across alerts (e.g. "starlette" vs "Starlette").
 function vulnerablePackageNamesOf(plan, alerts) {
-  const names = [...new Set(alerts.map(a => a.package).filter(Boolean))];
+  const seen = new Map();
+  for (const alert of alerts) {
+    if (!alert.package) continue;
+    const key = alert.package.toLowerCase();
+    if (!seen.has(key)) seen.set(key, alert.package);
+  }
+  const names = [...seen.values()];
   return names.length ? names : [plan.package.name];
+}
+
+// Splits a plan's alerts by the vulnerable package they were reported
+// against, so each distinct vulnerable package gets its own summary row
+// instead of being merged into one comma-separated cell.
+function alertsByVulnerablePackage(plan, alerts) {
+  const names = vulnerablePackageNamesOf(plan, alerts);
+  if (names.length <= 1) return [[names[0], alerts]];
+  const byKey = new Map(names.map(name => [name.toLowerCase(), []]));
+  for (const alert of alerts) {
+    const key = (alert.package || '').toLowerCase();
+    (byKey.get(key) || byKey.get(names[0].toLowerCase())).push(alert);
+  }
+  return names.map(name => [name, byKey.get(name.toLowerCase())]);
 }
 
 function buildIssueGroupSummarySection(ecosystem, plans) {
@@ -202,8 +224,9 @@ function buildIssueGroupSummarySection(ecosystem, plans) {
   for (const plan of vulnerablePlans) {
     const alerts = buildAlerts(plan);
     const depType = isTransitivePlan(plan) ? 'Transitive' : 'Direct';
-    const packageNames = vulnerablePackageNamesOf(plan, alerts).map(name => `\`${name}\``).join(', ');
-    section += `| ${packageNames} | ${alerts.length} | ${severityLabel(alerts)} | ${depType} | ${parentPackagesOf(plan)} |\n`;
+    for (const [packageName, packageAlerts] of alertsByVulnerablePackage(plan, alerts)) {
+      section += `| \`${packageName}\` | ${packageAlerts.length} | ${severityLabel(packageAlerts)} | ${depType} | ${parentPackagesOf(plan)} |\n`;
+    }
   }
   return section + '\n';
 }
