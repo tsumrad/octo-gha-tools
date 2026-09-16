@@ -96,7 +96,7 @@ function getActionLabel(plan) {
 }
 
 function buildAlerts(plan) {
-  if (plan.package.vulnerabilities) return dedupeAlerts(plan.package.vulnerabilities);
+  if (plan.package.vulnerabilities) return plan.package.vulnerabilities;
   const mdSummaries = {};
   const md = plan.action.placeholder_markdown || '';
   for (const m of md.matchAll(/- \*\*(GHSA-[\w-]+)\*\* \(CVSS ([\d.]+)\) - (.+)/g)) {
@@ -111,22 +111,6 @@ function buildAlerts(plan) {
     vulnerable_range: plan.package.current_version_range,
     first_patched: plan.fix.upgrade_version || '—',
   }));
-}
-
-// The same vulnerability alert (GHSA/CVE) can be reported against the same
-// package's underlying PackageContext more than once - e.g. once per lockfile
-// manifest path the package resolves at - so dedupe by advisory identity
-// before rendering, keeping the first-seen entry.
-function dedupeAlerts(alerts) {
-  const seen = new Set();
-  const deduped = [];
-  for (const alert of alerts) {
-    const key = (alert.ghsa_id || alert.cve_id || alert.url || JSON.stringify(alert)).toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(alert);
-  }
-  return deduped;
 }
 
 function vulnerabilityTableRows(alerts) {

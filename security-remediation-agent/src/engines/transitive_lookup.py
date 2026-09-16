@@ -31,7 +31,6 @@ class TransitiveLookup:
         npm_upgrade_resolvers = {}
         npm_resolution_cache = {}
         npm_root_packages = {}
-        await self._populate_direct_versions(owner, repo, items, resolvers, ref)
         for item in items:
             ecosystem = item.ecosystem.lower()
             if not item.istransitive or ecosystem not in {"npm", "npm_and_yarn", "pip", "pypi", "poetry"}:
@@ -175,96 +174,10 @@ class TransitiveLookup:
                         "manifest_path": lock_path,
                         "classification": classification,
                     }
-                    # The same package@version can be installed at multiple
-                    # nested node_modules locations in a single lockfile, each
-                    # producing its own NpmResolver occurrence with only the
-                    # introducers reachable from that specific location. Merge
-                    # those into one occurrence per (package, version,
-                    # manifest_path) so the union of all introducers is shown,
-                    # instead of duplicating the "introduced via" section once
-                    # per nested copy.
-                    self._merge_occurrence(item, occurrence)
+                    if occurrence not in item.transitive_dependency_occurrences:
+                        item.transitive_dependency_occurrences.append(occurrence)
                     if occurrence.get("version") and not item.current_version:
                         item.current_version = occurrence["version"]
-
-    async def _populate_direct_versions(self, owner, repo, items, resolvers, ref=None) -> None:
-        """Resolve current_version for direct packages from the manifest/lockfile.
-
-        Direct packages are never processed by the transitive walk above, so
-        without this pass their current_version could only come from a
-        Dependabot PR's from_version (populate_remediation_version), which is
-        unreliable when a PR is stale or superseded. Reading the lockfile here
-        gives the actual installed version, matching what's in package.json/
-        requirements.txt/pyproject.toml at the analyzed ref.
-        """
-        for item in items:
-            if item.istransitive or item.current_version:
-                continue
-            ecosystem = item.ecosystem.lower()
-            if ecosystem not in {"npm", "npm_and_yarn", "pip", "pypi", "poetry"}:
-                continue
-            paths = {a.manifest_path for a in item.vulnerabilities if a.manifest_path}
-            for path in sorted(paths):
-                if item.current_version:
-                    break
-                is_python = ecosystem in {"pip", "pypi", "poetry"}
-                is_poetry = is_python and PurePosixPath(path).name in {"poetry.lock", "pyproject.toml"}
-                lock_path = path if is_python else str(PurePosixPath(path).parent / "package-lock.json")
-                if is_poetry:
-                    lock_path = str(PurePosixPath(path).parent / "poetry.lock")
-                key = (owner.lower(), repo.lower(), ref, ecosystem, lock_path)
-                if key not in resolvers:
-                    try:
-                        text = await self.fetcher.fetch(owner, repo, lock_path, ref)
-                        if is_poetry:
-                            project_path = str(PurePosixPath(path).parent / "pyproject.toml")
-                            project_text = await self.fetcher.fetch(owner, repo, project_path, ref)
-                            resolvers[key] = PoetryResolver(text, project_text)
-                        elif is_python:
-                            resolvers[key] = await asyncio.to_thread(PipResolver.from_text, text)
-                        else:
-                            resolvers[key] = NpmResolver(json.loads(text))
-                    except (httpx.HTTPError, ValueError, subprocess.SubprocessError) as exc:
-                        logger.warning("Cannot resolve direct version from %s: %s", lock_path, exc)
-                        resolvers[key] = None
-                resolver = resolvers[key]
-                if resolver is None:
-                    continue
-                result = resolver.resolve(item.package)
-                if is_python and not is_poetry:
-                    if result.get("version"):
-                        item.current_version = result["version"]
-                    continue
-                # npm/poetry: prefer the occurrence installed at the manifest
-                # root (is_root) since that's the version package.json/
-                # pyproject.toml actually declares for a direct dependency.
-                occurrences = result.get("occurrences", [])
-                root_occurrence = next(
-                    (occ for occ in occurrences if occ.get("is_root") and occ.get("version")),
-                    None,
-                ) or next((occ for occ in occurrences if occ.get("version")), None)
-                if root_occurrence:
-                    item.current_version = root_occurrence["version"]
-
-    @staticmethod
-    def _merge_occurrence(item, occurrence: dict) -> None:
-        merge_key = (occurrence.get("package"), occurrence.get("version"), occurrence.get("manifest_path"))
-        for existing in item.transitive_dependency_occurrences:
-            existing_key = (existing.get("package"), existing.get("version"), existing.get("manifest_path"))
-            if existing_key != merge_key:
-                continue
-            seen = {(i.get("package"), i.get("version")) for i in existing.get("introducers", [])}
-            for introducer in occurrence.get("introducers", []):
-                key = (introducer.get("package"), introducer.get("version"))
-                if key not in seen:
-                    seen.add(key)
-                    existing.setdefault("introducers", []).append(introducer)
-            existing["introducers"] = sorted(
-                existing["introducers"],
-                key=lambda i: (i.get("package") or "", i.get("version") or ""),
-            )
-            return
-        item.transitive_dependency_occurrences.append(occurrence)
 
     @staticmethod
     def _upsert_recommendation(
