@@ -83,6 +83,9 @@ test('a direct package stays direct even when it also introduces an unrelated tr
 
 test('accepts empty plans and rejects missing output or invalid severity', () => {
   assert.deepEqual(prepareOutput({ remediation_plan_bundles: [] }), { groups: {} });
-  assert.throws(() => prepareOutput(null), /RemediationPlan/);
+  // The orchestrator returns null when there are no findings at all - a
+  // legitimate "no work" result, so this must produce empty groups, not throw.
+  assert.deepEqual(prepareOutput(null), { groups: {} });
+  assert.throws(() => prepareOutput('not-an-object'), /RemediationPlan/);
   assert.throws(() => prepareOutput({ remediation_plan_bundles: [] }, 'invalid'), /Invalid severity/);
 });

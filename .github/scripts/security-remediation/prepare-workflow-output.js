@@ -54,7 +54,13 @@ function isBreakablePackage(remediationPackage) {
 }
 
 function prepareOutput(raw, severities = 'critical,high,medium,low') {
-  if (!raw || !Array.isArray(raw.remediation_plan_bundles)) {
+  // The orchestrator returns None (serialized as JSON null) when there are no
+  // findings at all for the repo - a legitimate "no work" result, not an
+  // error. Only reject a raw value that is present but malformed.
+  if (raw === null || raw === undefined) {
+    raw = { remediation_plan_bundles: [] };
+  }
+  if (typeof raw !== 'object' || !Array.isArray(raw.remediation_plan_bundles)) {
     throw new Error('Expected orchestrator RemediationPlan.remediation_plan_bundles array');
   }
   const selected = new Set(severities.split(',').map(normalizeSeverity));
