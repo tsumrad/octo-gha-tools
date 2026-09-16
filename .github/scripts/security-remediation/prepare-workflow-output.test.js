@@ -3,10 +3,14 @@ const assert = require('node:assert/strict');
 const { prepareOutput } = require('./prepare-workflow-output');
 
 test('normalizes moderate and medium in filters, alerts, and issue severity', () => {
-  const raw = { plan_id: 'alias', remediation_plans: [
-    { packages: [{ name: 'a', vulnerabilities: [{ severity: 'medium' }] },
-      { name: 'b', vulnerabilities: [{ severity: 'Moderate' }, { severity: 'low' }] }] },
-    { severity: 'moderate', packages: [{ name: 'c' }] },
+  const raw = { plan_id: 'alias', remediation_plan_bundles: [
+    { groupName: 'group-a', ecosystem: 'npm', packages: [
+      { remediation_package: 'a', ecosystem: 'npm', packages: [{ vulnerabilities: [{ severity: 'medium' }] }] },
+      { remediation_package: 'b', ecosystem: 'npm', packages: [{ vulnerabilities: [{ severity: 'Moderate' }, { severity: 'low' }] }] },
+    ] },
+    { groupName: 'group-b', ecosystem: 'npm', severity: 'moderate', packages: [
+      { remediation_package: 'c', ecosystem: 'npm', packages: [{}] },
+    ] },
   ] };
   for (const filter of ['moderate', 'medium', ' Medium, MODERATE ']) {
     const result = prepareOutput(raw, filter);
@@ -17,13 +21,21 @@ test('normalizes moderate and medium in filters, alerts, and issue severity', ()
 });
 
 test('adapts ecosystem packages, chooses highest severity and routes actions', () => {
-  const pkg = { name: 'example', current_version: '1.0', upgrade_to_version: '1.2',
-    vulnerabilities: [{ severity: 'low' }, { severity: 'high', ghsa_id: 'GHSA-example' }],
-    pull_requests: [{ pr_number: 12, version_bumps: [{ package: 'example', to_version: '1.2' }] }] };
-  const raw = { plan_id: 'plan', remediation_plans: [{ ecosystem: 'pip', packages: [
-    pkg, { ...pkg, isbreakable: true }, { ...pkg, pull_requests: [] },
-    { ...pkg, upgrade_to_version: '', pull_requests: [] },
-    { ...pkg, pull_requests: [{ pr_number: 13, version_bumps: [{ package: 'example', to_version: '1.1' }] }] },
+  const basePkg = (overrides = {}) => ({
+    remediation_package: 'example',
+    ecosystem: 'pip',
+    current_version: '1.0',
+    remediation_version: '1.2',
+    packages: [{ vulnerabilities: [{ severity: 'low' }, { severity: 'high', ghsa_id: 'GHSA-example' }] }],
+    remediation_prs: [{ pr_number: 12, version_bumps: [{ package: 'example', to_version: '1.2' }] }],
+    ...overrides,
+  });
+  const raw = { plan_id: 'plan', remediation_plan_bundles: [{ groupName: 'default', ecosystem: 'pip', packages: [
+    basePkg(),
+    basePkg({ packages: [{ vulnerabilities: [{ severity: 'low' }, { severity: 'high', ghsa_id: 'GHSA-example' }], isbreakable: true }] }),
+    basePkg({ remediation_prs: [] }),
+    basePkg({ remediation_version: '', remediation_prs: [] }),
+    basePkg({ remediation_prs: [{ pr_number: 13, version_bumps: [{ package: 'example', to_version: '1.1' }] }] }),
   ] }] };
   const plans = prepareOutput(raw).groups.high.plans;
   assert.deepEqual(plans.map(p => p.action.action_type),
@@ -34,10 +46,22 @@ test('adapts ecosystem packages, chooses highest severity and routes actions', (
   assert.equal(new Set(plans.map(p => p.plan_id)).size, 5);
   assert.match(plans[2].action.placeholder_markdown, /GHSA-example/);
   assert.deepEqual(prepareOutput(raw, 'critical').groups, {});
+  assert.ok(plans.every(p => p.bundle.groupName === 'default' && p.bundle.ecosystem === 'pip'));
+});
+
+test('marks a package transitive when any underlying PackageContext is non-root', () => {
+  const raw = { plan_id: 'plan', remediation_plan_bundles: [{ groupName: 'grp', ecosystem: 'npm', packages: [
+    { remediation_package: 'child', ecosystem: 'npm', current_version: '1.0', remediation_version: '1.1',
+      packages: [{ relationship: 'transitive', vulnerabilities: [{ severity: 'high' }],
+        transitive_dependency_occurrences: [{ package: 'child', version: '1.0', introducers: [{ package: 'parent', version: '2.0' }] }] }] },
+  ] }] };
+  const [plan] = prepareOutput(raw).groups.high.plans;
+  assert.equal(plan.package.relationship, 'transitive');
+  assert.equal(plan.package.dependency_occurrences.length, 1);
 });
 
 test('accepts empty plans and rejects missing output or invalid severity', () => {
-  assert.deepEqual(prepareOutput({ remediation_plans: [] }), { groups: {} });
+  assert.deepEqual(prepareOutput({ remediation_plan_bundles: [] }), { groups: {} });
   assert.throws(() => prepareOutput(null), /RemediationPlan/);
-  assert.throws(() => prepareOutput({ remediation_plans: [] }, 'invalid'), /Invalid severity/);
+  assert.throws(() => prepareOutput({ remediation_plan_bundles: [] }, 'invalid'), /Invalid severity/);
 });

@@ -85,3 +85,56 @@ test('tracking issues group by ecosystem and major package or minor-patch, acros
   assert.equal(output.stats.total_reviewed_prs, 9);
   assert.doesNotMatch(updated[0].body, /vite|postcss|nanoid|cryptography/);
 });
+
+test('creates one tracking issue per package bundle when bundle metadata is present', async () => {
+  const planWithBundle = (name, ecosystem, groupName) => ({
+    package: { name, ecosystem, effective_severity: 'medium', unique_ghsas: [], current_version_range: '1.0.0' },
+    fix: { fix_class: 'NON_BREAKING_BUMP' },
+    action: { action_type: 'open_issue' }, state: {},
+    bundle: { groupName, ecosystem, severity: 'medium' },
+  });
+  const raw = { groups: {
+    medium: { plans: [
+      planWithBundle('underscore', 'npm', 'default'),
+      planWithBundle('moment-timezone', 'npm', 'default'),
+      planWithBundle('node-sass', 'npm', 'css-tools'),
+    ] },
+  } };
+
+  const remediationPlan = { summary: { context: {
+    total_vulnerabilities: 3, total_code_scanning_alerts: 0,
+    total_reviewed_prs: 0, total_ignored_prs: 0, total_remediation_prs: 0,
+  } } };
+
+  const created = [];
+  let output;
+  const github = { rest: {
+    search: { issuesAndPullRequests: async () => ({ data: { items: [] } }) },
+    issues: {
+      getLabel: async () => ({}), setLabels: async () => ({}), addLabels: async () => ({}),
+      update: async () => {},
+      create: async args => { created.push(args); return { data: { number: created.length, html_url: 'https://example.test/issue' } }; },
+    },
+  } };
+  const fakeFs = {
+    readFileSync: file => JSON.stringify(file === 'orchestrator-output.json' ? remediationPlan : raw),
+    existsSync: () => true,
+    writeFileSync: (file, data) => { output = JSON.parse(data); },
+  };
+  await new AsyncFunction('github', 'context', 'core', 'require', 'process', 'console', source)(
+    github, { repo: { owner: 'owner', repo: 'repo' }, serverUrl: 'https://github.com', runId: 1 },
+    { info() {}, warning(message) { throw new Error(message); } },
+    name => { assert.equal(name, 'fs'); return fakeFs; }, { env: { BASE_BRANCH: 'main' } }, console,
+  );
+
+  assert.equal(created.length, 2);
+  const defaultIssue = created.find(i => i.title === '[Security Remediation] [npm] [default]');
+  const cssToolsIssue = created.find(i => i.title === '[Security Remediation] [npm] [css-tools]');
+  assert.ok(defaultIssue);
+  assert.ok(cssToolsIssue);
+  assert.match(defaultIssue.body, /`underscore`/);
+  assert.match(defaultIssue.body, /`moment-timezone`/);
+  assert.doesNotMatch(defaultIssue.body, /node-sass/);
+  assert.match(cssToolsIssue.body, /`node-sass`/);
+  assert.equal(output.stats.total_issues_created, 2);
+});
