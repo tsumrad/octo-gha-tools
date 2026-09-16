@@ -19,30 +19,6 @@ function ownPackageContexts(remediationPackage) {
   return own.length ? own : (remediationPackage.packages || []);
 }
 
-// The same Dependabot alert can appear on more than one merged PackageContext
-// for a package (e.g. once per lockfile manifest path it resolves at), so
-// dedupe by the alert's own identity before computing severity/advisories.
-// Keyed on the Dependabot alert number/URL first since two distinct alerts
-// can legitimately share one ghsa_id (e.g. separate alerts for a 1.x and a
-// 2.x vulnerable range of the same advisory).
-function dedupeVulnerabilities(vulnerabilities) {
-  const seen = new Set();
-  const deduped = [];
-  for (const v of vulnerabilities) {
-    const key = (
-      v.number != null ? `n:${v.number}` :
-      v.url ? `u:${v.url}` :
-      v.ghsa_id ? `g:${v.ghsa_id}` :
-      v.cve_id ? `c:${v.cve_id}` :
-      `j:${JSON.stringify(v)}`
-    ).toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(v);
-  }
-  return deduped;
-}
-
 function isTransitivePackage(remediationPackage) {
   return ownPackageContexts(remediationPackage).some(pkg => (pkg.relationship || '').toLowerCase() === 'transitive'
     || pkg.is_direct === false);
