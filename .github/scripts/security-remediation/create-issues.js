@@ -172,21 +172,11 @@ function severityCounts(plans) {
 }
 
 function repositorySummaryMarkdown(plans) {
-  const metrics = [
-    ['Open security alerts', 'total_vulnerabilities'],
-    ['Open code scanning alerts', 'total_code_scanning_alerts'],
-    ['Open PRs reviewed', 'total_reviewed_prs'],
-    ['PRs matched (used as remediation)', 'total_remediation_prs'],
-    ['PRs ignored (no matching finding)', 'total_ignored_prs'],
-  ];
-  let section = '## Summary\n\n| Metric | Value |\n|---|---|\n' +
-    metrics.map(([label, key]) => `| ${label} | ${summaryContext[key] ?? 0} |`).join('\n') + '\n\n';
-
   const counts = severityCounts(plans);
-  section += `| ${SEVERITY_BUCKETS.join(' | ')} |\n` +
+  return '## Summary\n\n' +
+    `| ${SEVERITY_BUCKETS.join(' | ')} |\n` +
     `|${SEVERITY_BUCKETS.map(() => '---').join('|')}|\n` +
     `| ${SEVERITY_BUCKETS.map(bucket => counts[bucket]).join(' | ')} |\n\n`;
-  return section;
 }
 
 // ── Issue group summary section (per-package overview table) ───────────────

@@ -68,8 +68,8 @@ test('tracking issues group by ecosystem and major package or minor-patch, acros
 
   const minor = created.find(i => i.title === '[Security Remediation] [npm] [Minor-Patch]');
   assert.ok(minor);
-  assert.match(minor.body, /Open security alerts \| 61/);
-  assert.match(minor.body, /Open code scanning alerts \| 3/);
+  assert.match(minor.body, /## Summary\n/);
+  assert.doesNotMatch(minor.body, /Open security alerts|Open code scanning alerts/);
   assert.match(minor.body, /`postcss`/);
   assert.match(minor.body, /`nanoid`/);
   assert.doesNotMatch(minor.body, /axios|vite|cryptography/);
