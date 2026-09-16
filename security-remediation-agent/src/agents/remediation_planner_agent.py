@@ -174,11 +174,20 @@ class RemediationPlannerAgent:
 
                 for occurrence in package.package_upgrade_recommendations:
                     key = occurrence.package
+                    # For a transitive RemeditionPackage, the "package" being
+                    # remediated here IS the introducer (occurrence.package),
+                    # not the vulnerable child (package.name). Its
+                    # current_version must reflect the introducer's own
+                    # installed version (occurrence.from_version, resolved
+                    # from the lockfile/manifest ancestor), not the child
+                    # vulnerable package's current_version -- otherwise the
+                    # bundle shows e.g. "@vue/cli-service" upgrading from the
+                    # child dependency's version instead of its own.
                     if key not in unique_update_packages:
                         unique_update_packages[key] = RemeditionPackage(
                             remediation_package=key,
                             ecosystem=package.ecosystem,
-                            current_version=package.current_version,
+                            current_version=occurrence.from_version or package.current_version,
                             remediation_version=occurrence.to_version,
                             packages=[package],
                             remediation_prs=list(package.pull_requests),
@@ -187,6 +196,8 @@ class RemediationPlannerAgent:
                         update_package = unique_update_packages[key]
                         self._merge_packages(update_package, package)
                         self._merge_pull_requests(update_package, package.pull_requests)
+                        if not update_package.current_version and occurrence.from_version:
+                            update_package.current_version = occurrence.from_version
 
         transitive_remediation_packages = list(unique_update_packages.values())
 
