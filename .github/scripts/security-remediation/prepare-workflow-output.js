@@ -89,7 +89,22 @@ function prepareOutput(raw, severities = 'critical,high,medium,low') {
       (groups[severity] ||= { plans: [] }).plans.push(plan);
     }
   }
-  return { groups };
+  // Authoritative severity counts come from the orchestrator's
+  // SecurityRemediationContext.vulnerabilities_summary (RemediationPlan.summary),
+  // which tallies each unique Dependabot alert exactly once. Re-deriving
+  // counts from plan.package.vulnerabilities double-counts alerts that
+  // appear on multiple PackageContext entries (e.g. a package resolved at
+  // several lockfile locations), so callers should prefer this field for
+  // the "Vulnerability Categories" table instead of summing per-plan arrays.
+  const summaryCounts = raw.summary?.vulnerabilities_summary || {};
+  const vulnerabilities_summary = {
+    critical: summaryCounts.critical || 0,
+    high: summaryCounts.high || 0,
+    medium: summaryCounts.medium || 0,
+    low: summaryCounts.low || 0,
+    others: summaryCounts.others || 0,
+  };
+  return { groups, vulnerabilities_summary };
 }
 
 if (require.main === module) {

@@ -82,7 +82,23 @@ test('a direct package stays direct even when it also introduces an unrelated tr
 });
 
 test('accepts empty plans and rejects missing output or invalid severity', () => {
-  assert.deepEqual(prepareOutput({ remediation_plan_bundles: [] }), { groups: {} });
+  assert.deepEqual(prepareOutput({ remediation_plan_bundles: [] }),
+    { groups: {}, vulnerabilities_summary: { critical: 0, high: 0, medium: 0, low: 0, others: 0 } });
   assert.throws(() => prepareOutput(null), /RemediationPlan/);
   assert.throws(() => prepareOutput({ remediation_plan_bundles: [] }, 'invalid'), /Invalid severity/);
+});
+
+test('surfaces the orchestrator vulnerabilities_summary instead of re-deriving counts from plan arrays', () => {
+  // The orchestrator's SecurityRemediationContext.vulnerabilities_summary
+  // tallies each unique Dependabot alert exactly once. It must be passed
+  // through as-is rather than recomputed by summing plan.package.vulnerabilities,
+  // which can double-count alerts that appear on multiple PackageContext
+  // entries for the same package (e.g. multiple lockfile locations).
+  const raw = {
+    plan_id: 'plan',
+    remediation_plan_bundles: [],
+    summary: { vulnerabilities_summary: { critical: 358, high: 120, medium: 0, low: 0, others: 3 } },
+  };
+  const result = prepareOutput(raw);
+  assert.deepEqual(result.vulnerabilities_summary, { critical: 358, high: 120, medium: 0, low: 0, others: 3 });
 });

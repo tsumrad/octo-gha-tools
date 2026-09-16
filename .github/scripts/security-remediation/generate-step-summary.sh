@@ -93,8 +93,3 @@ others="$(jq '.vulnerabilities_summary.others // 0' workflow-plans.json)"
 	echo "| $critical | $high | $medium | $low | $others |"
 
 } >>"$GITHUB_STEP_SUMMARY"
-
-# for sev in critical high medium low; do
-# 	count="$(jq --arg s "$sev" '[.groups[$s].plans? // [] | .[] | (.package.vulnerabilities // []) | length] | add // 0' workflow-plans.json 2>/dev/null || echo 0)"
-# 	echo "| ${sev} | ${count} |" >>"$GITHUB_STEP_SUMMARY"
-# done
