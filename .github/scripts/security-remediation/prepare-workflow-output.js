@@ -7,16 +7,26 @@ function normalizeSeverity(value) {
   return severity === 'moderate' ? 'medium' : severity;
 }
 
-// A RemeditionPackage is direct when none of its underlying PackageContext
-// entries are marked transitive (relationship === 'transitive' or is_direct === false).
+// A RemeditionPackage is direct when none of its OWN PackageContext entries
+// (i.e. those describing this exact package, not a transitive child it
+// happens to introduce/fix) are marked transitive. RemeditionPackage.packages
+// can contain PackageContext entries for other vulnerable packages this
+// package introduces as a parent - those must not affect this package's own
+// direct/transitive classification.
+function ownPackageContexts(remediationPackage) {
+  const name = (remediationPackage.remediation_package || '').toLowerCase();
+  const own = (remediationPackage.packages || []).filter(pkg => (pkg.name || '').toLowerCase() === name);
+  return own.length ? own : (remediationPackage.packages || []);
+}
+
 function isTransitivePackage(remediationPackage) {
-  return (remediationPackage.packages || []).some(pkg => (pkg.relationship || '').toLowerCase() === 'transitive'
+  return ownPackageContexts(remediationPackage).some(pkg => (pkg.relationship || '').toLowerCase() === 'transitive'
     || pkg.is_direct === false);
 }
 
-// A bundle package is breakable if any underlying PackageContext says so.
+// A bundle package is breakable if any of its OWN PackageContext entries say so.
 function isBreakablePackage(remediationPackage) {
-  return (remediationPackage.packages || []).some(pkg => pkg.isbreakable === true);
+  return ownPackageContexts(remediationPackage).some(pkg => pkg.isbreakable === true);
 }
 
 function prepareOutput(raw, severities = 'critical,high,medium,low') {

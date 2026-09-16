@@ -326,9 +326,6 @@ function buildTransitiveDetails(plan) {
   }
   const transitiveOf = plan.package.transitive_source_packages || plan.package.transitive_source_package || [];
   const srcList = Array.isArray(transitiveOf) ? transitiveOf.join(', ') : String(transitiveOf);
-  details += `- **Dependency Type**: Transitive \n`;
-  const fixVer = plan.fix.non_breaking_fix || plan.fix.breaking_fix || plan.fix.upgrade_version;
-  if (fixVer) details += `- **Required Action**: Bump \`${plan.action.target_package}\` to \`>= ${fixVer}\`\n`;
   const mdNote = plan.action.placeholder_markdown || '';
   const undershoot = mdNote.match(/Existing PR #(\d+) is insufficient[^)]*\(([^)]+)\)/);
   if (undershoot) details += `- **Existing PR**: #${undershoot[1]} undershoots required version - [view](${undershoot[2]})\n`;
@@ -336,7 +333,7 @@ function buildTransitiveDetails(plan) {
 }
 
 function buildDirectDetails(plan, transitiveChildren) {
-  let details = `- **Dependency Type**: Direct\n`;
+  let details = '';
   if (transitiveChildren.length > 0) {
     details += `- **Transitive Vulnerabilities Resolved**: ${transitiveChildren.map(t => `\`${t.package.name}\``).join(', ')}\n`;
   }
@@ -375,8 +372,6 @@ function buildPlanDetailSection(plan, allPlans) {
   if (plan.state.issue_id) {
     section += `- **Tracking Issue**: #${plan.state.issue_id} ([view](${plan.state.issue_url}))\n`;
   }
-  section += `- **Fix Class**: ${plan.fix.fix_class}\n`;
-  section += `- **Breaking Change**: ${plan.fix.fix_class === 'BREAKING_BUMP' ? 'Yes' : 'No'}\n\n`;
 
   if (alerts.length > 0) {
     section += `**Vulnerabilities**:\n\n| ID | Summary | CVSS | Affected Versions | Fixed In |\n|---|---|---|---|---|\n`;

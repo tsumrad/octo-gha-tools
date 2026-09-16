@@ -60,6 +60,27 @@ test('marks a package transitive when any underlying PackageContext is non-root'
   assert.equal(plan.package.dependency_occurrences.length, 1);
 });
 
+test('a direct package stays direct even when it also introduces an unrelated transitive vulnerability', () => {
+  // Reproduces the axios scenario: axios is a direct dependency, but it also
+  // introduces follow-redirects transitively. The remediation planner keys
+  // the follow-redirects fix recommendation by the introducer's name
+  // ("axios"), so RemeditionPackage("axios").packages ends up containing
+  // BOTH axios's own (direct) PackageContext and follow-redirects's
+  // (transitive) PackageContext. Only axios's own context should determine
+  // axios's relationship.
+  const raw = { plan_id: 'plan', remediation_plan_bundles: [{ groupName: 'grp', ecosystem: 'npm', packages: [
+    { remediation_package: 'axios', ecosystem: 'npm', current_version: '0.28.0', remediation_version: '1.7.9',
+      packages: [
+        { name: 'axios', relationship: 'direct', vulnerabilities: [{ severity: 'high', package: 'axios' }] },
+        { name: 'follow-redirects', relationship: 'transitive', vulnerabilities: [{ severity: 'high', package: 'follow-redirects' }],
+          transitive_dependency_occurrences: [{ package: 'follow-redirects', version: '1.15.6',
+            introducers: [{ package: 'axios', version: '0.28.0' }] }] },
+      ] },
+  ] }] };
+  const [plan] = prepareOutput(raw).groups.high.plans;
+  assert.equal(plan.package.relationship, 'direct');
+});
+
 test('accepts empty plans and rejects missing output or invalid severity', () => {
   assert.deepEqual(prepareOutput({ remediation_plan_bundles: [] }), { groups: {} });
   assert.throws(() => prepareOutput(null), /RemediationPlan/);
