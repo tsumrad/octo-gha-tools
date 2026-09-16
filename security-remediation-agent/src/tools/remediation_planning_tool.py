@@ -2,54 +2,46 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime
-from venv import logger
 
 from langchain_core.tools import tool
-from pydantic import BaseModel, Field
-from packaging.version import Version, InvalidVersion
 from uuid_utils import uuid4
 
-from src.models.remediation_plan import (
-    ActionType,
-    EcosystemContext,
+from ..engines.remediation_grouping_engine import RemediationGroupingEngine
+from ..models.triage_result import (
     IssueContext,
     PackageContext,
-    RemediationPlan,
-    SummaryContext,
+    TriageResult,
 )
-from src.models.security_package_triage import SecurityPackageTriage
-from src.tools.model.pull_request_metadata import PullRequestMetadata
+from ..models.security_package_triage import SecurityPackageTriage
+
+RenovateGroupingService = RemediationGroupingEngine
 
 
 
 @tool("build_remediation_plan")
 def build_remediation_plan(
-    triage_result: list[SecurityPackageTriage],
-) -> RemediationPlan:
+    triage_result: TriageResult,
+) -> TriageResult:
     """Build a remediation plan from a package vulnerability triage result."""
     if not triage_result:
-        return RemediationPlan(
+        return TriageResult(
             plan_id=f"plan_{date.today():%Y%m%d}_{uuid4().hex[:8]}",
             created_at=datetime.utcnow(),
             remediation_plans=[],
-            summary=SummaryContext(
-                ecosystem_summary=[],
-            ),
         )
 
-    return RemediationPlan(
+    return TriageResult(
         plan_id=f"plan_{date.today():%Y%m%d}_{uuid4().hex[:8]}",
         created_at=datetime.utcnow(),
         remediation_plans=create_issue_context(triage_result),
-        #summary=build_summary(triage_result),
     )
 
 
 def create_package_context(pkg: SecurityPackageTriage) -> PackageContext:
     return PackageContext(
         name=pkg.package,
-        dependency_occurrences=pkg.dependency_occurrences,
-        introducer_pull_requests=pkg.introducer_pull_requests,
+        transitive_dependency_occurrences=pkg.transitive_dependency_occurrences,
+        package_upgrade_recommendations=pkg.package_upgrade_recommendations,
         ecosystem=pkg.ecosystem,
         current_version=pkg.current_version,
         relationship="transitive" if pkg.istransitive else "direct",
@@ -63,12 +55,13 @@ def create_package_context(pkg: SecurityPackageTriage) -> PackageContext:
 
     )
 
-def create_issue_context(triage_result: list[SecurityPackageTriage]) -> list[IssueContext]:
+def create_issue_context(triage_result: TriageResult) -> list[IssueContext]:
     #Create by ecosystem
     grouped: dict[str, list[SecurityPackageTriage]] = defaultdict(list)   
 
-    for pkg in triage_result:
-        grouped[pkg.ecosystem].append(pkg)
+    for plan in triage_result.remediation_plans:
+        for pkg in plan.packages:
+            grouped[pkg.ecosystem].append(pkg)
 
     issue_contexts = []
 
@@ -80,7 +73,6 @@ def create_issue_context(triage_result: list[SecurityPackageTriage]) -> list[Iss
                     create_package_context(pkg)
                     for pkg in packages
                 ],
-                coding_agent=None,
                 severity=None,
             )
         )

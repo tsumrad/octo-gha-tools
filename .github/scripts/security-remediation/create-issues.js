@@ -426,13 +426,20 @@ function buildCategoryMap() {
   return categoryMap;
 }
 
+// Groups plans into one tracking issue per package bundle, using the
+// bundle metadata (groupName/ecosystem) attached by prepare-workflow-output.js
+// from the orchestrator's RemeditionPackageBundle. Falls back to the
+// ecosystem/impact heuristic for plans without bundle metadata (e.g. older
+// workflow-plans.json artifacts or hand-authored test fixtures).
 function buildIssueGroups() {
   const issueGroups = new Map();
   for (const sourceGroup of Object.values(output)) {
     for (const plan of sourceGroup.plans || []) {
-      const ecosystem = plan.package.ecosystem || 'unknown';
-      const upgradeGroup = getImpact(plan) === 'breaking'
-        ? `Major(${getGroupingPackageName(plan)})` : 'Minor-Patch';
+      const bundle = plan.bundle;
+      const ecosystem = (bundle && bundle.ecosystem) || plan.package.ecosystem || 'unknown';
+      const upgradeGroup = bundle && bundle.groupName
+        ? bundle.groupName
+        : (getImpact(plan) === 'breaking' ? `Major(${getGroupingPackageName(plan)})` : 'Minor-Patch');
       const key = JSON.stringify([ecosystem, upgradeGroup]);
       if (!issueGroups.has(key)) {
         issueGroups.set(key, { ecosystem, upgradeGroup, plans: [] });

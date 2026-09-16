@@ -44,7 +44,6 @@ class ManifestFetcher:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(url, headers=headers, params=params)
         response.raise_for_status()
-        # Directories are returned as API JSON even when raw media is requested.
         if response.headers.get("content-type", "").startswith("application/json"):
             raise ValueError(f"Contents API did not return a raw file for {path}")
         content = response.content.decode("utf-8-sig")
@@ -54,3 +53,4 @@ class ManifestFetcher:
     def clear_cache(self) -> None:
         """Discard all cached manifests, for example before starting another run."""
         self._cache.clear()
+

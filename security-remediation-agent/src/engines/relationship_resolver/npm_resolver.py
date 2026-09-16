@@ -27,13 +27,14 @@ class NpmResolver:
     def resolve(self, target: str) -> dict:
         occurrences = []
 
-        for location in self.by_name.get(target, []):
+        for location in sorted(self.by_name.get(target, [])):
             pkg = self.packages[location]
-
             occurrences.append({
                 "package": target,
                 "version": pkg.get("version"),
+                # Return only actionable ancestors declared by the application.
                 "introducers": self._find_introducers(location),
+                "is_root": self._is_root_location(location),
             })
 
         return {
@@ -64,39 +65,41 @@ class NpmResolver:
                             parent_location
                         )
 
-    def _find_introducers(
-        self,
-        location: str,
-    ) -> list[dict]:
+    def _find_introducers(self, location: str) -> list[dict]:
+        """Return unique actionable ancestors declared in the root manifest."""
         result = {}
-        visited = set()
-        stack = [location]
+        visited = {location}
+        stack = list(self.parents.get(location, ()))
 
         while stack:
             current = stack.pop()
-
-            if current in visited:
+            if not current or current in visited:
                 continue
-
             visited.add(current)
 
-            for parent in self.parents.get(current, ()):
+            reference = self._package_reference(current)
+            is_root = self._is_root_location(current)
+            if is_root:
+                key = (reference["package"], reference.get("version"))
+                result[key] = reference
+            stack.extend(self.parents.get(current, ()))
 
-                # Root → current
-                if parent == "":
-                    name = self._package_name(current)
-                    version = self.packages[current].get("version")
+        return sorted(
+            result.values(),
+            key=lambda item: (
+                item["package"],
+                item.get("version") or "",
+            ),
+        )
 
-                    result[(name, version)] = {
-                        "package": name,
-                        "version": version,
-                    }
+    def _is_root_location(self, location: str) -> bool:
+        return "" in self.parents.get(location, ())
 
-                    continue
-
-                stack.append(parent)
-
-        return list(result.values())
+    def _package_reference(self, location: str) -> dict:
+        return {
+            "package": self._package_name(location),
+            "version": self.packages[location].get("version"),
+        }
 
     def _resolve_child(
         self,

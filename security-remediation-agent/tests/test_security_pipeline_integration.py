@@ -1,6 +1,7 @@
 import logging
 import sys
 import types
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,9 @@ from src.agents.vulnerability_collector_agent import VulnerabilityCollectorAgent
 from src.agents.vulnerability_triage_agent import VulnerabilityTriageAgent
 from src.engines.policy_engine import package_relationship_lookup as relationship_module
 from src.models.remediation_plan import ActionType
+from src.models.security_remediation_context import SecurityRemediationContext
+from src.models.security_package_triage import PackageUpgradeRecommendation
+from src.models.triage_result import IssueContext, PackageContext, TriageResult
 from src.tools.model.codescanning_alert import CodescanningAlert
 from src.tools.model.pull_request_metadata import PullRequestMetadata
 from src.tools.utils.version_bump_resolver import VersionBump
@@ -62,6 +66,118 @@ async def test_cli_configures_logging_for_info_messages(monkeypatch):
     await cli_main.async_main()
 
     assert root_logger.level == logging.INFO
+
+
+@pytest.mark.asyncio
+async def test_remediation_planner_includes_root_occurrence_as_transitive_remediation_package():
+    triage_result = TriageResult(
+        plan_id="plan-1",
+        created_at=datetime.utcnow(),
+        remediation_plans=[
+            IssueContext(
+                ecosystem="npm",
+                packages=[
+                    PackageContext(
+                        name="lodash",
+                        ecosystem="npm",
+                        transitive_dependency_occurrences=[
+                            {"package": "axios", "version": "0.28.1"},
+                            {"package": "axios", "version": "0.28.1"},
+                        ],
+                        vulnerabilities=[
+                            VulnerabilityAlert(
+                                package="axios",
+                                ecosystem="npm",
+                                severity="high",
+                                ghsa_id="GHSA-axios",
+                                first_patched="1.6.8",
+                                vulnerable_range=">=0.18.0,<1.6.8",
+                                relationship="transitive",
+                            ),
+                            VulnerabilityAlert(
+                                package="axios",
+                                ecosystem="npm",
+                                severity="high",
+                                ghsa_id="GHSA-axios",
+                                first_patched="1.6.8",
+                                vulnerable_range=">=0.18.0,<1.6.8",
+                                relationship="transitive",
+                            ),
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    result = await RemediationPlannerAgent().plan(triage_result, SecurityRemediationContext())
+
+    assert result is not None
+    assert [pkg.name for pkg in result.transitive_remediation_packages] == ["axios"]
+    assert len(result.transitive_remediation_packages[0].vulnerabilities) == 1
+
+
+@pytest.mark.asyncio
+async def test_remediation_planner_deduplicates_transitive_update_packages():
+    triage_result = TriageResult(
+        plan_id="plan-1",
+        created_at=datetime.utcnow(),
+        remediation_plans=[
+            IssueContext(
+                ecosystem="npm",
+                packages=[
+                    PackageContext(
+                        name="lodash",
+                        ecosystem="npm",
+                        transitive_dependency_occurrences=[
+                            {
+                                "package": "lodash",
+                                "version": "4.17.0",
+                                "introducers": [
+                                    {"package": "axios", "version": "0.28.1"},
+                                    {"package": "axios", "version": "0.28.1"},
+                                ],
+                            }
+                        ],
+                        package_upgrade_recommendations=[
+                            PackageUpgradeRecommendation(
+                                package="axios",
+                                from_version="0.28.1",
+                                to_version="1.6.8",
+                                requires_verification=False,
+                            )
+                        ],
+                        vulnerabilities=[
+                            VulnerabilityAlert(
+                                package="lodash",
+                                ecosystem="npm",
+                                severity="critical",
+                                ghsa_id="GHSA-lodash",
+                                first_patched="4.17.21",
+                                vulnerable_range=">=4.0.0,<4.17.21",
+                                relationship="transitive",
+                            ),
+                            VulnerabilityAlert(
+                                package="lodash",
+                                ecosystem="npm",
+                                severity="critical",
+                                ghsa_id="GHSA-lodash",
+                                first_patched="4.17.21",
+                                vulnerable_range=">=4.0.0,<4.17.21",
+                                relationship="transitive",
+                            ),
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    result = await RemediationPlannerAgent().plan(triage_result, SecurityRemediationContext())
+
+    assert result is not None
+    assert [pkg.name for pkg in result.transitive_remediation_packages] == ["axios"]
+    assert len(result.transitive_remediation_packages[0].vulnerabilities) == 1
 
 
 @pytest.mark.asyncio

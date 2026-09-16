@@ -2,11 +2,12 @@ import logging
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
-from src.models.remediation_plan import RemediationPlan
-from src.models.security_remediation_context import SecurityRemediationContext
+from ..models.triage_result import TriageResult
+from ..models.security_remediation_context import SecurityRemediationContext
 
-from src.models.security_findings import SecurityFindings
-from src.models.security_package_triage import SecurityPackageTriage
+from ..models.security_findings import SecurityFindings
+from ..models.security_package_triage import SecurityPackageTriage
+from ..models.remediation_plan import RemediationPlan
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class SecurityOrchestrator:
         self.reviewer = reviewer
         self.reporter = reporter
 
-    async def run(self, repo: str) -> RemediationPlan:
+    async def run(self, repo: str) -> TriageResult:
         started_at = datetime.utcnow()
         logger.info("Orchestration started for %s", repo) 
         #Context object
@@ -42,7 +43,7 @@ class SecurityOrchestrator:
 
         if findings.is_empty():
             logger.info("No vulnerabilities found for %s", repo)
-            #return OrchestrationReport.empty(repo)
+            return None
 
         logger.info(
             "Collected %d findings for %s (Dependabot: %d, retained code-scanning: %d)",
@@ -53,17 +54,17 @@ class SecurityOrchestrator:
         )
         
         # ── Step 2: Triage ─────────────────────────────────────────────────────
-        triage_result: list[SecurityPackageTriage] = await self._triage(repo, findings, remediation_context)
-        logger.info("Triage complete — %d packages", len(triage_result))
+        triage_result: TriageResult = await self._triage(repo, findings, remediation_context)
+        #logger.info("Triage complete — %d packages", len(triage_result.remediation_plans))
 
         # ── Step 3: Build remediation plans ────────────────────────────────────
-        bundle = await self._plan(triage_result, remediation_context)
-        logger.info("Built %d remediation plans", len(bundle.remediation_plans))
+        bundle = await self._plan(triage_result, remediation_context, repo)
+        #logger.info("Built %d remediation plans", len(bundle.remediation_plans))
         
-        for plan in bundle.remediation_plans:
-            logger.info("Remediation plan: %s (%d packages)", plan.ecosystem, len(plan.packages))
-            for package in plan.packages:
-                logger.info("  Package: %s (%d vulnerabilities, %d pull requests, %s)", package.name, len(package.vulnerabilities), len(package.pull_requests), package.relationship)
+        # for plan in bundle.remediation_plans:
+        #     logger.info("Remediation plan: %s (%d packages)", plan.ecosystem, len(plan.packages))
+        #     for package in plan.packages:
+        #         logger.info("  Package: %s (%d vulnerabilities, %d pull requests, %s)", package.name, len(package.vulnerabilities), len(package.pull_requests), package.relationship)
 
         # # ── Step 4: LLM Review ─────────────────────────────────────────────────────
         # review = await self._review(bundle)
@@ -90,21 +91,26 @@ class SecurityOrchestrator:
             logger.error("Collection failed for %s: %s", repo, e)
             raise OrchestrationError("collect", repo, e) from e
 
-    async def _triage(self, repo: str, security_findings: SecurityFindings, context: SecurityRemediationContext) -> list[SecurityPackageTriage]:
+    async def _triage(self, repo: str, security_findings: SecurityFindings, context: SecurityRemediationContext) -> TriageResult:
         try:
             return await self.triager.triage(repo, security_findings, context)
         except Exception as e:
             logger.error("Triage failed for %s: %s", repo, e)
             raise OrchestrationError("triage", repo, e) from e
 
-    async def _plan(self, triage_result: list[SecurityPackageTriage], context: SecurityRemediationContext) -> RemediationPlan:
+    async def _plan(
+        self,
+        triage_result: TriageResult,
+        context: SecurityRemediationContext,
+        repo: str,
+    ) -> RemediationPlan:
         try:
-            return await self.remediation_planner.plan(triage_result, context)            
+            return await self.remediation_planner.plan(triage_result, context, repo)
         except Exception as e:
             logger.error("Remediation planning failed: %s", e)
             raise OrchestrationError("remediation", None, e) from e
 
-    # async def _review(self, bundle: RemediationPlan) -> ReviewResult:
+    # async def _review(self, bundle: TriageResult) -> ReviewResult:
     #     try:
     #         return await self.review_agent.review(bundle)
     #     except Exception as e:
