@@ -9,9 +9,10 @@ from src.tools.codescanning_alerts_tool import (
 
 
 class StubResponse:
-    def __init__(self, data, headers=None):
+    def __init__(self, data, headers=None, status_code=200):
         self.data = data
         self.headers = headers or {}
+        self.status_code = status_code
 
     def raise_for_status(self):
         return None

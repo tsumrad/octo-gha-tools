@@ -234,7 +234,7 @@ function alertsByVulnerablePackage(plan, alerts) {
 
 function buildIssueGroupSummarySection(ecosystem, plans) {
   const vulnerablePlans = plans.filter(plan => buildAlerts(plan).length > 0);
-  let section = `\n## Issue Group Summary (${ecosystem})\n\n`;
+  let section = `\n## Package Vulnerability Summary (${ecosystem})\n\n`;
   section += `| Package | No. of Vulnerabilities | Severity | Direct/Transitive | Parent Packages |\n|---|---|---|---|---|\n`;
 
   if (vulnerablePlans.length === 0) {

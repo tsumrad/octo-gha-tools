@@ -39,6 +39,12 @@ async def get_codescanning_alerts(owner: str, repo: str) -> list[dict[str, Any]]
     async with httpx.AsyncClient(headers=headers, timeout=httpx.Timeout(30.0)) as client:
         while True:
             response = await client.get(url, params=params)
+            if response.status_code == 404:
+                # Code scanning is not enabled for this repository (or the
+                # token lacks access). GitHub returns 404 in that case rather
+                # than an empty list, so treat it as "no alerts" instead of
+                # failing the whole orchestration run.
+                break
             response.raise_for_status()
 
             alerts.extend(filter_codescanning_alerts(response.json()))
