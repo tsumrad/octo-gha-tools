@@ -95,6 +95,32 @@ function getActionLabel(plan) {
   return `${getImpact(plan)}-${getActionSuffix(plan)}`;
 }
 
+// The same Dependabot alert can be reported against a package's underlying
+// PackageContext more than once - e.g. once per lockfile manifest path the
+// package resolves at - so dedupe by the alert's own identity (Dependabot
+// alert number / URL) before rendering, keeping the first-seen entry. Two
+// distinct alerts can legitimately share one ghsa_id (e.g. the same advisory
+// filed separately for a 1.x and a 2.x vulnerable range), so ghsa_id/cve_id
+// are only used as a last-resort fallback key when no alert number/url is
+// present, to avoid collapsing genuinely separate alerts into one row.
+function dedupeAlerts(alerts) {
+  const seen = new Set();
+  const deduped = [];
+  for (const alert of alerts) {
+    const key = (
+      alert.number != null ? `n:${alert.number}` :
+      alert.url ? `u:${alert.url}` :
+      alert.ghsa_id ? `g:${alert.ghsa_id}` :
+      alert.cve_id ? `c:${alert.cve_id}` :
+      `j:${JSON.stringify(alert)}`
+    ).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(alert);
+  }
+  return deduped;
+}
+
 function buildAlerts(plan) {
   if (plan.package.vulnerabilities) return dedupeAlerts(plan.package.vulnerabilities);
   const mdSummaries = {};
