@@ -172,8 +172,12 @@ function severityLabel(alerts) {
   return `${bucket} (${maxCvss})`;
 }
 
-function parentPackagesOf(plan) {
-  const occurrences = plan.package.dependency_occurrences || [];
+// Parent (introducer) packages for a specific vulnerable package, scoped to
+// only the transitive_dependency_occurrences whose `package` matches it -
+// not every occurrence across the whole bundle/plan.
+function parentPackagesOf(plan, packageName) {
+  const occurrences = (plan.package.dependency_occurrences || []).filter(occ =>
+    !packageName || (occ.package || '').toLowerCase() === packageName.toLowerCase());
   const introducerNames = [...new Set(occurrences.flatMap(occ => (occ.introducers || []).map(i => i.package)))];
   const parents = introducerNames.length
     ? introducerNames
@@ -225,7 +229,7 @@ function buildIssueGroupSummarySection(ecosystem, plans) {
     const alerts = buildAlerts(plan);
     const depType = isTransitivePlan(plan) ? 'Transitive' : 'Direct';
     for (const [packageName, packageAlerts] of alertsByVulnerablePackage(plan, alerts)) {
-      section += `| \`${packageName}\` | ${packageAlerts.length} | ${severityLabel(packageAlerts)} | ${depType} | ${parentPackagesOf(plan)} |\n`;
+      section += `| \`${packageName}\` | ${packageAlerts.length} | ${severityLabel(packageAlerts)} | ${depType} | ${parentPackagesOf(plan, packageName)} |\n`;
     }
   }
   return section + '\n';
