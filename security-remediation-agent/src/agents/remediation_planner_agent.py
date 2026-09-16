@@ -122,8 +122,8 @@ class RemediationPlannerAgent:
 
     def _normalize_remediation_bundle(self, remediation_plan_bundles: list[RemeditionPackageBundle]) -> None:
         for bundle in remediation_plan_bundles:
-            bundle.severity = (
-                "HIGH"
+            bundle.update_category = (
+                "MAJOR"
                 if any(
                     Version(p.remediation_version.lstrip("vV")).major
                     > Version(p.current_version.lstrip("vV")).major
@@ -204,7 +204,7 @@ class RemediationPlannerAgent:
         all_remediation_packages = [*direct_remediation_packages, *transitive_remediation_packages]
         remediation_plan_bundles = await self._build_remediation_package_bundles(all_remediation_packages, repo)
         plan_result = RemediationPlan(
-            remediation_plan_bundles=remediation_plan_bundles,
+            remediation_plan_bundles=self._normalize_remediation_bundle(remediation_plan_bundles),
             summary= context,
         )
 

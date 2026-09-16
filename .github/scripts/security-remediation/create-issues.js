@@ -96,7 +96,7 @@ function getActionLabel(plan) {
 }
 
 function buildAlerts(plan) {
-  if (plan.package.vulnerabilities) return plan.package.vulnerabilities;
+  if (plan.package.vulnerabilities) return dedupeAlerts(plan.package.vulnerabilities);
   const mdSummaries = {};
   const md = plan.action.placeholder_markdown || '';
   for (const m of md.matchAll(/- \*\*(GHSA-[\w-]+)\*\* \(CVSS ([\d.]+)\) - (.+)/g)) {

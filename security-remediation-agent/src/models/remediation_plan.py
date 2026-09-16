@@ -22,6 +22,7 @@ class RemeditionPackageBundle:
     groupName: str
     ecosystem: str
     severity: str
+    update_category: str = "" # Major, Minor/Patch
     packages: list[RemeditionPackage] = field(default_factory=list)
     action_type: ActionType | None = None
 
