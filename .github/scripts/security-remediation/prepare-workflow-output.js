@@ -29,30 +29,6 @@ function isBreakablePackage(remediationPackage) {
   return ownPackageContexts(remediationPackage).some(pkg => pkg.isbreakable === true);
 }
 
-// The same Dependabot alert can appear on more than one merged PackageContext
-// for a package (e.g. once per lockfile manifest path it resolves at), so
-// dedupe by the alert's own identity before computing severity/advisories/
-// counts. Keyed on the Dependabot alert number/URL first since two distinct
-// alerts can legitimately share one ghsa_id (e.g. separate alerts for a 1.x
-// and a 2.x vulnerable range of the same advisory).
-function dedupeVulnerabilities(vulnerabilities) {
-  const seen = new Set();
-  const deduped = [];
-  for (const v of vulnerabilities) {
-    const key = (
-      v.number != null ? `n:${v.number}` :
-      v.url ? `u:${v.url}` :
-      v.ghsa_id ? `g:${v.ghsa_id}` :
-      v.cve_id ? `c:${v.cve_id}` :
-      `j:${JSON.stringify(v)}`
-    ).toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(v);
-  }
-  return deduped;
-}
-
 function prepareOutput(raw, severities = 'critical,high,medium,low') {
   if (!raw || !Array.isArray(raw.remediation_plan_bundles)) {
     throw new Error('Expected orchestrator RemediationPlan.remediation_plan_bundles array');
@@ -65,7 +41,7 @@ function prepareOutput(raw, severities = 'critical,high,medium,low') {
   for (const [bundleIndex, bundle] of raw.remediation_plan_bundles.entries()) {
     const bundleEcosystem = bundle.ecosystem || 'unknown';
     for (const [packageIndex, pkg] of (bundle.packages || []).entries()) {
-      const vulnerabilities = dedupeVulnerabilities((pkg.packages || []).flatMap(p => p.vulnerabilities || []));
+      const vulnerabilities = (pkg.packages || []).flatMap(p => p.vulnerabilities || []);
       const severity = SEVERITIES.find(s => vulnerabilities.some(v => normalizeSeverity(v.severity) === s))
         || normalizeSeverity(bundle.severity) || 'unknown';
       if (!selected.has(severity)) continue;

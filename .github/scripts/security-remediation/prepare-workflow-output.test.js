@@ -81,30 +81,6 @@ test('a direct package stays direct even when it also introduces an unrelated tr
   assert.equal(plan.package.relationship, 'direct');
 });
 
-test('dedupes vulnerability alerts merged across multiple PackageContext entries for one package', () => {
-  // Reproduces the node-forge inflated-count scenario: node-forge resolves at
-  // multiple lockfile locations/manifest paths, each producing its own
-  // PackageContext carrying the SAME 11 Dependabot alerts. Without dedup,
-  // flatMap((pkg.packages || []).vulnerabilities) triples that to 33+ and
-  // inflates the "Vulnerability Categories" counts in generate-step-summary.sh
-  // (which reads plan.package.vulnerabilities.length from workflow-plans.json).
-  const alerts = [
-    { number: 1, ghsa_id: 'GHSA-one', severity: 'high' },
-    { number: 2, ghsa_id: 'GHSA-two', severity: 'high' },
-  ];
-  const raw = { plan_id: 'plan', remediation_plan_bundles: [{ groupName: 'grp', ecosystem: 'npm', packages: [
-    { remediation_package: 'node-forge', ecosystem: 'npm', current_version: '0.10.0', remediation_version: '1.3.2',
-      packages: [
-        { name: 'node-forge', relationship: 'transitive', vulnerabilities: alerts },
-        { name: 'node-forge', relationship: 'transitive', vulnerabilities: alerts }, // duplicate manifest-path occurrence
-        { name: 'node-forge', relationship: 'transitive', vulnerabilities: alerts }, // duplicate manifest-path occurrence
-      ] },
-  ] }] };
-  const [plan] = prepareOutput(raw).groups.high.plans;
-  assert.equal(plan.package.vulnerabilities.length, 2);
-  assert.deepEqual(plan.package.unique_ghsas.sort(), ['GHSA-one', 'GHSA-two']);
-});
-
 test('accepts empty plans and rejects missing output or invalid severity', () => {
   assert.deepEqual(prepareOutput({ remediation_plan_bundles: [] }), { groups: {} });
   assert.throws(() => prepareOutput(null), /RemediationPlan/);
