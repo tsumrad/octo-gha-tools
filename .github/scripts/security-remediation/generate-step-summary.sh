@@ -79,11 +79,11 @@ fi
 if [ ! -f workflow-plans.json ]; then
 	exit 0
 fi
-critical=$(jq -r '.vulnerabilities_summary.critical' <<<"$summary")
-high=$(jq -r '.vulnerabilities_summary.high' <<<"$summary")
-medium=$(jq -r '.vulnerabilities_summary.medium' <<<"$summary")
-low=$(jq -r '.vulnerabilities_summary.low' <<<"$summary")
-others=$(jq -r '.vulnerabilities_summary.others' <<<"$summary")
+critical="$(jq '.vulnerabilities_summary.critical // 0' workflow-plans.json)"
+high="$(jq '.vulnerabilities_summary.high // 0' workflow-plans.json)"
+medium="$(jq '.vulnerabilities_summary.medium // 0' workflow-plans.json)"
+low="$(jq '.vulnerabilities_summary.low // 0' workflow-plans.json)"
+others="$(jq '.vulnerabilities_summary.others // 0' workflow-plans.json)"
 
 {
 	echo "### Vulnerability Categories"
@@ -94,7 +94,7 @@ others=$(jq -r '.vulnerabilities_summary.others' <<<"$summary")
 
 } >>"$GITHUB_STEP_SUMMARY"
 
-for sev in critical high medium low; do
-	count="$(jq --arg s "$sev" '[.groups[$s].plans? // [] | .[] | (.package.vulnerabilities // []) | length] | add // 0' workflow-plans.json 2>/dev/null || echo 0)"
-	echo "| ${sev} | ${count} |" >>"$GITHUB_STEP_SUMMARY"
-done
+# for sev in critical high medium low; do
+# 	count="$(jq --arg s "$sev" '[.groups[$s].plans? // [] | .[] | (.package.vulnerabilities // []) | length] | add // 0' workflow-plans.json 2>/dev/null || echo 0)"
+# 	echo "| ${sev} | ${count} |" >>"$GITHUB_STEP_SUMMARY"
+# done
