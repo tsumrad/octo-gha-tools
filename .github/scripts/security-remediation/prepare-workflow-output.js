@@ -65,7 +65,7 @@ function prepareOutput(raw, severities = 'critical,high,medium,low') {
   for (const [bundleIndex, bundle] of raw.remediation_plan_bundles.entries()) {
     const bundleEcosystem = bundle.ecosystem || 'unknown';
     for (const [packageIndex, pkg] of (bundle.packages || []).entries()) {
-      const vulnerabilities = (pkg.packages || []).flatMap(p => p.vulnerabilities || []);
+      const vulnerabilities = dedupeVulnerabilities((pkg.packages || []).flatMap(p => p.vulnerabilities || []));
       const severity = SEVERITIES.find(s => vulnerabilities.some(v => normalizeSeverity(v.severity) === s))
         || normalizeSeverity(bundle.severity) || 'unknown';
       if (!selected.has(severity)) continue;
