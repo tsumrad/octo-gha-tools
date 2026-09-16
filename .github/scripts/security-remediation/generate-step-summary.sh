@@ -79,13 +79,18 @@ fi
 if [ ! -f workflow-plans.json ]; then
 	exit 0
 fi
+critical=$(jq -r '.vulnerabilities_summary.critical' <<<"$summary")
+high=$(jq -r '.vulnerabilities_summary.high' <<<"$summary")
+medium=$(jq -r '.vulnerabilities_summary.medium' <<<"$summary")
+low=$(jq -r '.vulnerabilities_summary.low' <<<"$summary")
+others=$(jq -r '.vulnerabilities_summary.others' <<<"$summary")
 
 {
 	echo "### Vulnerability Categories"
 	echo
 	echo "| Critical | High | Medium | Low | Others |"
 	echo "|:--------:|:----:|:------:|:---:|:------:|"
-	echo "| $summary.vulnerabilities_summary.critical | $summary.vulnerabilities_summary.high | $summary.vulnerabilities_summary.medium | $summary.vulnerabilities_summary.low | $summary.vulnerabilities_summary.others |"
+	echo "| $critical | $high | $medium | $low | $others |"
 
 } >>"$GITHUB_STEP_SUMMARY"
 
