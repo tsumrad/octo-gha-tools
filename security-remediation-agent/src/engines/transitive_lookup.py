@@ -33,7 +33,10 @@ class TransitiveLookup:
         npm_root_packages = {}
         for item in items:
             ecosystem = item.ecosystem.lower()
-            if not item.istransitive or ecosystem not in {"npm", "npm_and_yarn", "pip", "pypi", "poetry"}:
+            # The resolver is now mandatory for every supported ecosystem so it
+            # can independently verify Dependabot's reported relationship,
+            # regardless of what Dependabot claims (direct vs transitive).
+            if ecosystem not in {"npm", "npm_and_yarn", "pip", "pypi", "poetry"}:
                 continue
             paths = {a.manifest_path for a in item.vulnerabilities if a.manifest_path}
             for path in sorted(paths):
@@ -163,11 +166,35 @@ class TransitiveLookup:
                     # Absence of a path is not evidence that the package is a
                     # direct dependency; it can also mean an incomplete graph.
                     # NpmResolver explicitly reports direct-root membership.
+                    # PipResolver reports direct/root packages by returning the
+                    # target itself as its own introducer (requested=True), so
+                    # detect that self-introducer case explicitly.
+                    is_pip_self_introduced = is_python and not is_poetry and any(
+                        introducer.get("package", "").lower() == item.package.lower()
+                        for introducer in introducers
+                    )
                     classification = (
                         OccurrenceClassification.ROOT
-                        if occurrence.get("is_root", False)
+                        if occurrence.get("is_root", False) or is_pip_self_introduced
                         else OccurrenceClassification.TRANSITIVE
                     )
+                    # The resolver reads the actual manifest/lockfile and is
+                    # treated as the source of truth. Dependabot's reported
+                    # relationship is only used for comparison/logging so any
+                    # disagreement is visible without silently overriding
+                    # the resolver's verdict.
+                    resolver_says_transitive = classification == OccurrenceClassification.TRANSITIVE
+                    if resolver_says_transitive != item.istransitive:
+                        logger.warning(
+                            "Relationship mismatch for %s in %s: Dependabot reported %s, "
+                            "PipResolver/NpmResolver determined %s from %s. Using resolver result.",
+                            item.package,
+                            lock_path,
+                            "transitive" if item.istransitive else "direct",
+                            "transitive" if resolver_says_transitive else "direct",
+                            lock_path,
+                        )
+                    item.istransitive = resolver_says_transitive
                     occurrence = {
                         **occurrence,
                         "introducers": introducers,
