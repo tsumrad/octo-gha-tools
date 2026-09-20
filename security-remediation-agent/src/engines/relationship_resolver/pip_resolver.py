@@ -1,5 +1,4 @@
 import json
-import re
 import subprocess
 import sys
 
@@ -17,13 +16,13 @@ class PipResolver:
         """
         Resolve dependencies from requirements text.
 
-        If the text is pip-compile output containing '# via' comments,
-        reconstruct the dependency graph directly from those comments.
+        If `text` is pip-compile output containing `# via` comments, reconstruct
+        the dependency graph directly from those comments.
 
-        Otherwise use pip --dry-run --report to resolve the graph.
+        Otherwise, resolve ordinary PEP 508 requirements using
+        `pip install --dry-run --report`.
         """
         compiled = cls._compiled_report(text)
-
         if compiled is not None:
             instance = cls("")
             instance._report = compiled
@@ -37,12 +36,18 @@ class PipResolver:
             if not line or line.startswith("#"):
                 continue
 
+            # Includes/options require project-aware handling.
+            if line.startswith(("-r ", "--requirement ", "-c ", "--constraint ", "--")):
+                raise ValueError(
+                    "Requirement includes/options are not supported by from_text(); "
+                    "use PipResolver(requirements_file) for project-aware resolution."
+                )
+
             requirement = Requirement(line)
 
             if requirement.url:
                 raise ValueError(
-                    "Source URL requirements are not supported "
-                    "for parent resolution"
+                    "Source URL requirements are not supported for parent resolution"
                 )
 
             requirements.append(str(requirement))
@@ -76,86 +81,90 @@ class PipResolver:
         )
 
         instance._report = json.loads(result.stdout)
-
         return instance
 
     @staticmethod
     def _compiled_report(text: str):
         """
-        Reconstruct a pip dependency graph from pip-compile output.
+        Reconstruct a pip-style dependency report from pip-compile output.
 
-        Example:
+        pip-compile semantics used here:
 
             fastapi==0.125.0
-                # via -r requirements.in
+                # via
+                #   -r requirements.in
+
+        => fastapi is a DIRECT/root dependency.
 
             starlette==0.50.0
                 # via
                 #   fastapi
+                #   fastapi-sqlalchemy
 
-        Produces semantics equivalent to pip's --report:
+        => starlette is TRANSITIVE with immediate parents
+           fastapi and fastapi-sqlalchemy.
 
-            fastapi:
-                requested = True
+        A package may be both explicitly requested and required by another
+        package. For example:
 
-            starlette:
-                requested = False
-                parent = fastapi
+            pydantic==1.10.26
+                # via
+                #   -r requirements.in
+                #   fastapi
 
-        Constraint files (-c / --constraint) NEVER make a package direct.
+        Pydantic remains a direct/root dependency because `-r ...` is present.
+
+        Constraint references (`-c` / `--constraint`) do NOT make a package
+        direct and are not dependency parents.
         """
-
         entries = {}
-
         current = None
         in_via = False
         has_via = False
 
-        for line in text.splitlines():
-            stripped = line.strip()
+        for raw_line in text.splitlines():
+            stripped = raw_line.strip()
+
+            # Blank lines end the current requirement/comment block.
+            if not stripped:
+                current = None
+                in_via = False
+                continue
 
             # ----------------------------------------------------------
-            # Parse comments belonging to current requirement
+            # Comments
             # ----------------------------------------------------------
-
             if stripped.startswith("#"):
                 if current is None:
                     continue
 
                 comment = stripped[1:].strip()
 
-                # Start of:
+                # Start of a multiline block:
                 #
                 #   # via
                 #   #   fastapi
-                #
-                # or:
-                #
-                #   # via -r requirements.in
-                #
-                if comment == "via" or comment.startswith("via "):
+                if comment == "via":
                     has_via = True
                     in_via = True
-
-                    comment = comment[3:].strip()
-
-                    if not comment:
-                        continue
-
-                # Continuation of a multiline # via block.
-                elif in_via:
-                    # pip-compile continuation lines are indented:
-                    #
-                    #     #   fastapi
-                    #     #   -r requirements.in
-                    #
-                    if not re.match(r"^\s*#\s{2,}\S", line):
-                        in_via = False
-                        continue
-
-                else:
                     continue
 
+                # Single-line form:
+                #
+                #   # via fastapi
+                if comment.startswith("via "):
+                    has_via = True
+                    in_via = True
+                    comment = comment[4:].strip()
+                elif not in_via:
+                    # Other generated comments do not describe parents.
+                    continue
+
+                if not comment:
+                    continue
+
+                # pip-compile commonly emits one source per line, but handling
+                # comma-separated sources costs nothing and keeps this robust.
                 sources = [
                     source.strip()
                     for source in comment.split(",")
@@ -163,33 +172,20 @@ class PipResolver:
                 ]
 
                 for source in sources:
-
-                    # -----------------------------------------------
-                    # Explicit source manifest => DIRECT dependency
-                    # -----------------------------------------------
-
-                    if source.startswith(
-                        ("-r ", "--requirement ")
-                    ):
+                    # Explicit requirements-file provenance means this package
+                    # is a direct/root dependency.
+                    if source.startswith(("-r ", "--requirement ")):
                         entries[current]["requested"] = True
                         continue
 
-                    # -----------------------------------------------
-                    # Constraint file does NOT make dependency direct
-                    # -----------------------------------------------
-
-                    if source.startswith(
-                        ("-c ", "--constraint ")
-                    ):
+                    # Constraints influence versions only; they do not make the
+                    # package direct and are not dependency parents.
+                    if source.startswith(("-c ", "--constraint ")):
                         continue
 
-                    # Ignore any other pip option.
+                    # Ignore other pip options/directives.
                     if source.startswith("-"):
                         continue
-
-                    # -----------------------------------------------
-                    # Otherwise this is a dependency parent
-                    # -----------------------------------------------
 
                     parent = canonicalize_name(source)
 
@@ -199,29 +195,17 @@ class PipResolver:
                 continue
 
             # ----------------------------------------------------------
-            # Empty line terminates current via block
+            # Requirement/pin line
             # ----------------------------------------------------------
-
-            if not stripped:
-                current = None
-                in_via = False
-                continue
-
             in_via = False
             current = None
 
-            # Ignore global pip options/includes.
+            # Ignore global pip options and include directives.
             if stripped.startswith(
-                (
-                    "--hash=",
-                    "--",
-                    "-r ",
-                    "-c ",
-                )
+                ("--hash=", "--", "-r ", "--requirement ", "-c ", "--constraint ")
             ):
                 continue
 
-            # pip-compile may produce line continuation for hashes.
             requirement_text = stripped.rstrip("\\").strip()
 
             try:
@@ -229,13 +213,14 @@ class PipResolver:
             except ValueError:
                 continue
 
-            # We only care about fully pinned pip-compile entries.
             pins = [
                 specifier.version
                 for specifier in requirement.specifier
                 if specifier.operator in {"==", "==="}
             ]
 
+            # This parser intentionally handles pip-compile's fully pinned
+            # requirements only.
             if len(pins) != 1:
                 continue
 
@@ -251,47 +236,39 @@ class PipResolver:
                 },
             }
 
-        # This wasn't pip-compile output.
         if not has_via:
             return None
 
-        # --------------------------------------------------------------
-        # Convert:
-        #
-        # starlette.parents = ["fastapi"]
-        #
-        # into:
-        #
-        # fastapi.requires_dist = ["starlette"]
-        #
-        # so _find_introducers() can use the same logic as pip --report.
-        # --------------------------------------------------------------
-
+        # Convert child -> parents from `# via` into parent -> requires_dist so
+        # the same introducer traversal works for pip reports and compiled text.
         for child, entry in entries.items():
             for parent in entry["parents"]:
-                if parent not in entries:
+                parent_entry = entries.get(parent)
+
+                if parent_entry is None:
                     continue
 
-                requires = entries[parent]["metadata"]["requires_dist"]
+                requires = parent_entry["metadata"]["requires_dist"]
 
                 if child not in requires:
                     requires.append(child)
 
-        return {
-            "install": list(entries.values())
-        }
+        return {"install": list(entries.values())}
 
     def resolve(self, target: str) -> dict:
         """
-        Return the installed/resolved target version and its actionable
-        ROOT introducers.
-        """
+        Resolve `target` and return only actionable ROOT introducers.
 
+        Direct target:
+            requirements.in -> starlette
+            => introducer = starlette
+
+        Transitive target:
+            requirements.in -> fastapi -> starlette
+            => introducer = fastapi
+        """
         if self._report is not None:
-            return self._find_introducers(
-                self._report,
-                target,
-            )
+            return self._find_introducers(self._report, target)
 
         result = subprocess.run(
             [
@@ -316,61 +293,24 @@ class PipResolver:
             timeout=180,
         )
 
-        report = json.loads(result.stdout)
+        self._report = json.loads(result.stdout)
+        return self._find_introducers(self._report, target)
 
-        self._report = report
-
-        return self._find_introducers(
-            report,
-            target,
-        )
-
-    def _find_introducers(
-        self,
-        report: dict,
-        target: str,
-    ) -> dict:
+    def _find_introducers(self, report: dict, target: str) -> dict:
         """
-        Find actionable ROOT introducers for target.
+        Find actionable root introducers.
 
         Rules:
-
-        1. If target itself is explicitly requested/direct:
-              target is the introducer.
-
-        2. Otherwise walk upward through transitive parents until an
-           explicitly requested/root dependency is reached.
-
-        3. Return only root introducers.
-
-        Example:
-
-            requirements.in
-                fastapi
-
-            fastapi
-                -> starlette
-                    -> vulnerable-package
-
-        vulnerable-package introducer:
-            fastapi
-
-        If requirements.in explicitly contains starlette:
-
-            starlette
-
-        then starlette itself is the introducer.
+        1. `requested=True` means direct/root.
+        2. If the target itself is direct, return the target as its introducer.
+        3. Otherwise traverse immediate parents upward until direct/root
+           dependencies are reached.
+        4. Return only those roots; do not return intermediate transitives.
         """
-
         packages = {}
-
-        # --------------------------------------------------------------
-        # Normalize pip report
-        # --------------------------------------------------------------
 
         for item in report.get("install", []):
             metadata = item.get("metadata", {})
-
             name = metadata.get("name")
 
             if not name:
@@ -381,78 +321,40 @@ class PipResolver:
             packages[key] = {
                 "name": name,
                 "version": metadata.get("version"),
-                "requires": metadata.get(
-                    "requires_dist",
-                    [],
-                ) or [],
-                "requested": bool(
-                    item.get("requested", False)
-                ),
-                "extras": item.get(
-                    "requested_extras",
-                    [],
-                ) or [],
+                "requires": metadata.get("requires_dist", []) or [],
+                "requested": bool(item.get("requested", False)),
+                "extras": item.get("requested_extras", []) or [],
             }
 
-        # --------------------------------------------------------------
-        # Build reverse dependency graph:
-        #
-        # child -> [parents]
-        #
-        # fastapi -> starlette
-        #
-        # becomes:
-        #
-        # starlette -> [fastapi]
-        # --------------------------------------------------------------
-
+        # Build reverse graph: child -> immediate parents.
         reverse = {}
 
         for parent_key, parent in packages.items():
-
             for req_text in parent["requires"]:
-
                 try:
                     req = Requirement(req_text)
 
-                    # Respect environment/extras markers.
                     if req.marker:
-                        extras = [
-                            "",
-                            *parent["extras"],
-                        ]
+                        extras = ["", *parent["extras"]]
 
                         if not any(
-                            req.marker.evaluate(
-                                {"extra": extra}
-                            )
+                            req.marker.evaluate({"extra": extra})
                             for extra in extras
                         ):
                             continue
-
                 except Exception:
-                    # Invalid metadata shouldn't break the entire
-                    # dependency graph.
+                    # A malformed metadata requirement should not prevent
+                    # analysis of the remainder of the graph.
                     continue
 
-                child_key = canonicalize_name(
-                    req.name
-                )
-
-                parents = reverse.setdefault(
-                    child_key,
-                    [],
-                )
+                child_key = canonicalize_name(req.name)
+                parents = reverse.setdefault(child_key, [])
 
                 if parent_key not in parents:
                     parents.append(parent_key)
 
         target_key = canonicalize_name(target)
         target_pkg = packages.get(target_key)
-
-        # --------------------------------------------------------------
-        # Target wasn't found
-        # --------------------------------------------------------------
 
         if target_pkg is None:
             return {
@@ -461,16 +363,8 @@ class PipResolver:
                 "introducers": [],
             }
 
-        # --------------------------------------------------------------
-        # IMPORTANT:
-        #
-        # If the target itself is explicitly declared in requirements.in,
-        # it is already the actionable root.
-        #
-        # Don't walk to FastAPI/etc and incorrectly report those as the
-        # introducer.
-        # --------------------------------------------------------------
-
+        # A directly declared vulnerable package is itself the actionable root,
+        # even when another package also depends on it (e.g. Pydantic).
         if target_pkg["requested"]:
             return {
                 "package": target_pkg["name"],
@@ -483,11 +377,6 @@ class PipResolver:
                 ],
             }
 
-        # --------------------------------------------------------------
-        # Transitive target:
-        # walk upward until requested/root packages are reached.
-        # --------------------------------------------------------------
-
         introducers = {}
         visited = set()
 
@@ -497,10 +386,7 @@ class PipResolver:
 
             visited.add(name)
 
-            for parent_key in reverse.get(
-                name,
-                [],
-            ):
+            for parent_key in reverse.get(name, []):
                 parent = packages.get(parent_key)
 
                 if parent is None:
@@ -511,17 +397,19 @@ class PipResolver:
                         "package": parent["name"],
                         "version": parent["version"],
                     }
-                    continue
-
-                walk(parent_key)
+                else:
+                    walk(parent_key)
 
         walk(target_key)
+
+        # Sort for deterministic output/tests.
+        ordered_introducers = [
+            introducers[key]
+            for key in sorted(introducers)
+        ]
 
         return {
             "package": target_pkg["name"],
             "version": target_pkg["version"],
-            "introducers": list(
-                introducers.values()
-            ),
+            "introducers": ordered_introducers,
         }
-   
