@@ -61,14 +61,11 @@ class SecurityOrchestrator:
         bundle = await self._plan(triage_result, remediation_context, repo)
         #logger.info("Built %d remediation plans", len(bundle.remediation_plans))
         
-        for plan in bundle.remediation_plan_bundles:
-            logger.info("Remediation plan: %s (%d bundles)", plan.ecosystem, len(plan.packages))
-            if plan.groupName == "ESLint and TypeScript linting":
-                #logger.info("  plan: %s", plan)
-                for package in plan.packages:
-                    #logger.info("  Package: %s (%s -> %s) (%d pull requests)", package.remediation_package,  package.current_version, package.remediation_version, len(package.remediation_prs))
-                    for pr in package.remediation_prs:
-                        logger.info("    Pull request: %s", pr)
+        # for plan in bundle.remediation_plans:
+        #     logger.info("Remediation plan: %s (%d packages)", plan.ecosystem, len(plan.packages))
+        #     for package in plan.packages:
+        #         logger.info("  Package: %s (%d vulnerabilities, %d pull requests, %s)", package.name, len(package.vulnerabilities), len(package.pull_requests), package.relationship)
+
         # # ── Step 4: LLM Review ─────────────────────────────────────────────────────
         # review = await self._review(bundle)
         # logger.info(

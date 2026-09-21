@@ -1,7 +1,6 @@
 import logging
 import uuid
 
-from ..engines.peer_dependency_reconciler import PeerDependencyReconciler
 from ..engines.remediation_grouping_engine import RemediationGroupingEngine
 from ..models.remediation_plan import (
     RemediationPlan,
@@ -20,7 +19,6 @@ logger = logging.getLogger(__name__)
 class RemediationPlannerAgent:
     def __init__(self) -> None:
         self.tools = [build_remediation_plan]
-        self._peer_reconciler = PeerDependencyReconciler()
 
     @staticmethod
     def _merge_packages(target: RemeditionPackage, package: PackageContext) -> None:
@@ -97,18 +95,13 @@ class RemediationPlannerAgent:
         """Group packages using the repository's Renovate packageRules when possible.
 
         Falls back to grouping by ecosystem if `repo` isn't provided or the
-        renovate.json5 config can't be fetched/parsed. Every returned bundle
-        has had its packages' versions peer-dependency-reconciled: grouping
-        alone (Renovate packageRules) does not guarantee the chosen versions
-        install together, so this is re-verified each time a bundle is built.
+        renovate.json5 config can't be fetched/parsed.
         """
         owner = (repo or {}).get("owner")
         name = (repo or {}).get("name")
         logger.info("Building remediation package bundles for repo: %s/%s", owner, name)
         if not owner or not name:
-            bundles = self._build_remediation_package_bundles_by_ecosystem(remediation_packages)
-            await self._reconcile_peer_dependencies(bundles)
-            return bundles
+            return self._build_remediation_package_bundles_by_ecosystem(remediation_packages)
 
         try:
             bundles = await RemediationGroupingEngine.group_packages_from_github(
@@ -121,27 +114,11 @@ class RemediationPlannerAgent:
                 name,
                 e,
             )
-            bundles = self._build_remediation_package_bundles_by_ecosystem(remediation_packages)
-            await self._reconcile_peer_dependencies(bundles)
-            return bundles
+            return self._build_remediation_package_bundles_by_ecosystem(remediation_packages)
 
         for bundle in bundles:
             bundle.packages = self._dedupe_bundle_packages(bundle.packages)
-        await self._reconcile_peer_dependencies(bundles)
         return bundles
-
-    async def _reconcile_peer_dependencies(self, bundles: list[RemeditionPackageBundle]) -> None:
-        """Verify/adjust each bundle's package versions for npm peerDependencies
-        compatibility. Runs every time bundles are (re)built, since grouping
-        (Renovate packageRules) and per-package version floors (allowedVersions)
-        don't by themselves guarantee the set installs together."""
-        for bundle in bundles:
-            try:
-                await self._peer_reconciler.reconcile(bundle)
-            except Exception as e:
-                logger.warning(
-                    "Peer dependency reconciliation failed for bundle %s: %s", bundle.groupName, e
-                )
 
     def _normalize_remediation_bundle(self, remediation_plan_bundles: list[RemeditionPackageBundle]) -> None:
         for bundle in remediation_plan_bundles:
