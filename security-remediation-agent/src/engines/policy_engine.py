@@ -2,7 +2,7 @@ import re
 from itertools import zip_longest
 from typing import Any
 
-from src.tools.model.vulnerability_alert import VulnerabilityAlert
+from ..tools.model.vulnerability_alert import VulnerabilityAlert
 
 SEVERITY_PRIORITY = {
     "critical": 4,

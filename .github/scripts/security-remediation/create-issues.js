@@ -271,26 +271,36 @@ function buildAcceptanceCriteriaSection(plans) {
   return section + '\n';
 }
 
+// Deduplicates a list of PR references by PR number, keeping the first
+// occurrence of each. Used wherever a category/plan may reference the same
+// PR multiple times (e.g. rollup PRs matched via several plans).
+function dedupePRsByNumber(prs) {
+  return [...new Map(prs.map(p => [p.number, p])).values()];
+}
+
 // ── Remediation pull requests overview table ────────────────────────────────
 
 function remediationStatusFor(act, cPlans, categoryPRs) {
+  // Always surface any remediation PR that's already been matched for this
+  // category, regardless of the plan's action_type (rollup/standalone/
+  // placeholder/open-issue). Only fall back to action_type-specific
+  // messaging when no PR exists.
+  if (categoryPRs) {
+    if (Array.isArray(categoryPRs)) {
+      if (categoryPRs.length > 0) {
+        const uniq = dedupePRsByNumber(categoryPRs);
+        const links = uniq.map(p => `[#${p.number}](${p.url})`).join(', ');
+        return { link: links, status: act === 'placeholder' ? 'Draft - awaiting agent/manual fix' : 'Open' };
+      }
+    } else {
+      return { link: `[${categoryPRs.title}](${categoryPRs.url})`, status: 'Open' };
+    }
+  }
   if (act === 'open-issue') {
     return { link: '—', status: 'No fix available - issue tracking only' };
   }
   if (act === 'placeholder') {
-    if (categoryPRs && categoryPRs.length > 0) {
-      const uniq = [...new Map(categoryPRs.map(p => [p.number, p])).values()];
-      return { link: uniq.map(p => `[#${p.number}](${p.url})`).join(', '), status: 'Draft - awaiting agent/manual fix' };
-    }
     return { link: '—', status: 'Stub branch creation failed' };
-  }
-  if (categoryPRs) {
-    if (Array.isArray(categoryPRs)) {
-      const links = [...new Map(categoryPRs.map(p => [p.number, p])).values()]
-        .map(p => `[#${p.number}](${p.url})`).join(', ');
-      return { link: links, status: 'Open' };
-    }
-    return { link: `[${categoryPRs.title}](${categoryPRs.url})`, status: 'Open' };
   }
   return { link: '—', status: 'No remediation PR matched' };
 }
@@ -414,7 +424,7 @@ function buildCategoryDetailSections(ecosystem, categoryMap, groupPlansSet, grou
 
       if (act === 'placeholder') {
         const phPRs = groupPRs(cat) || [];
-        const uniqPRs = [...new Map(phPRs.map(p => [p.number, p])).values()];
+        const uniqPRs = dedupePRsByNumber(phPRs);
         if (uniqPRs.length > 0) {
           body += `**Placeholder PR**: ${uniqPRs.map(p => `[#${p.number}](${p.url})`).join(', ')} _(draft - push fixes or assign to agent)_\n\n`;
         }
