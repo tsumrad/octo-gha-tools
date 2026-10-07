@@ -57,12 +57,17 @@ test('uses the lower version as the minimum and omits the note when both version
     { remediation_package: 'same-version', current_version: '1.0.0',
       remediation_version: '2.0.0', upgrade_to_version: '2.0.0',
       packages: [{ vulnerabilities: [{ severity: 'high' }] }] },
+    { remediation_package: 'only-remediation-version', current_version: '1.0.0',
+      remediation_version: '3.0.0',
+      packages: [{ vulnerabilities: [{ severity: 'high' }] }] },
   ] }] };
   const plans = prepareOutput(raw).groups.high.plans;
   assert.match(plans[0].action.placeholder_markdown,
     /to `5\.1\.0` \[minimum version: 5\.0\.9\]/);
   assert.match(plans[1].action.placeholder_markdown, /to `2\.0\.0` \(direct,/);
   assert.doesNotMatch(plans[1].action.placeholder_markdown, /\[minimum version:/);
+  assert.match(plans[2].action.placeholder_markdown, /to `3\.0\.0` \(direct,/);
+  assert.doesNotMatch(plans[2].action.placeholder_markdown, /\[minimum version:/);
 });
 
 test('marks a package transitive when any underlying PackageContext is non-root', () => {

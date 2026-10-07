@@ -67,6 +67,9 @@ function prepareOutput(raw, severities = 'critical,high,medium,low') {
       versions.sort(compareVersions);
       const minimumVersion = versions[0] || '';
       const target = versions.at(-1) || '';
+      const hasDistinctMinimum = remediationVersion
+        && upgradeToVersion
+        && compareVersions(remediationVersion, upgradeToVersion) !== 0;
       const isbreakable = isBreakablePackage(pkg);
       const relationship = isTransitivePackage(pkg) ? 'transitive' : 'direct';
       // Only reuse a PR whose package and target match the planned upgrade.
@@ -78,7 +81,7 @@ function prepareOutput(raw, severities = 'critical,high,medium,low') {
       const actionType = ['rollup_pr', 'standalone_pr'].includes(action) && !pr ? 'placeholder_pr' : action;
       const advisories = [...new Set(vulnerabilities.map(v => v.ghsa_id).filter(Boolean))];
       const dependencyOccurrences = (pkg.packages || []).flatMap(p => p.transitive_dependency_occurrences || []);
-      const minimumVersionNote = minimumVersion && minimumVersion !== target
+      const minimumVersionNote = hasDistinctMinimum
         ? ` [minimum version: ${minimumVersion}]`
         : '';
       const markdown = `### ${name} (${ecosystem})\n\n` +
