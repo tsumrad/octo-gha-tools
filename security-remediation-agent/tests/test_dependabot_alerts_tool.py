@@ -260,12 +260,12 @@ async def test_vulnerability_collector_agent_uses_dependabot_tool(monkeypatch):
         async def ainvoke(self, tool_input):
             return [{"dependabot_tool_input": tool_input}]
 
-    class StubCodeScanningAlertsTool:
+    class StubCodescanningAlertsTool:
         async def ainvoke(self, tool_input):
             return [{"codescanning_tool_input": tool_input}]
 
     monkeypatch.setattr(agent_module, "dependabot_alerts_tool", StubDependabotAlertsTool())
-    monkeypatch.setattr(agent_module, "codescanning_alerts_tool", StubCodeScanningAlertsTool())
+    monkeypatch.setattr(agent_module, "codescanning_alerts_tool", StubCodescanningAlertsTool())
 
     alerts = await vulnerabilityCollectorAgent().collect(
         SimpleNamespace(owner="octo-org", name="octo-repo")

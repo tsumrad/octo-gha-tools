@@ -17,7 +17,7 @@ from src.tools.dependabot_alerts_tool import (
 LANGUAGE_SPECIFIC_PACKAGE_VULNERABILITY_RULE = "LanguageSpecificPackageVulnerability"
 
 
-class CodeScanningAlertInput(BaseModel):
+class CodescanningAlertInput(BaseModel):
     owner: str = Field(description="Repository owner or organization.")
     repo: str = Field(description="Repository name.")
 
@@ -82,7 +82,7 @@ async def normalize(alerts: Iterable[dict[str, Any]]) -> list[CodescanningAlert]
 
 @tool(
     "collect_codescanning_alerts",
-    args_schema=CodeScanningAlertInput,
+    args_schema=CodescanningAlertInput,
 )
 async def codescanning_alerts_tool(owner: str, repo: str) -> list[dict[str, Any]]:
     """Collect open GitHub code scanning alerts for a repository."""
