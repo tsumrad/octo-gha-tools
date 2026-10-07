@@ -23,6 +23,7 @@ test('tracking issues group by ecosystem and major package or minor-patch, acros
     introducers: [{ package: 'fastapi', version: '0.125.0' },
       { package: 'fastapi-sqlalchemy', version: '0.2.1' }] }];
   raw.groups.medium.plans.push(starlette);
+  raw.groups.medium.plans.push(plan('System.Linq.Dynamic.Core', 'nuget'));
   // Pre-existing PRs matched upstream (not created by this script).
   raw.groups.medium.plans[2].action = { action_type: 'rollup_pr', pr_number: 10, pull_url: 'https://example.test/10' };
   raw.groups.high.plans[0].action = { action_type: 'rollup_pr', pr_number: 11, pull_url: 'https://example.test/11' };
@@ -31,6 +32,7 @@ test('tracking issues group by ecosystem and major package or minor-patch, acros
   const remediationPlan = {
     reconciliation_info: [
       { ecosystem: 'npm', reconciliation_notes: 'Manifest: package.json\nExit code: 0\naxios 1.0.0 → 2.0.0' },
+      { ecosystem: 'nuget', reconciliation_notes: 'DotnetSecurityFailures/App.csproj: candidate 1.9.0' },
     ],
     summary: { context: {
       total_vulnerabilities: 61, total_code_scanning_alerts: 3,
@@ -65,9 +67,9 @@ test('tracking issues group by ecosystem and major package or minor-patch, acros
 
   assert.equal(updated.length, 1);
   assert.equal(updated[0].issue_number, 42);
-  assert.equal(created.length, 3);
-  assert.equal(output.stats.total_issues_created, 4);
-  assert.equal(Object.keys(output.created_issues).length, 4);
+  assert.equal(created.length, 4);
+  assert.equal(output.stats.total_issues_created, 5);
+  assert.equal(Object.keys(output.created_issues).length, 5);
   assert.equal(output.stats.total_rollup_prs_created, 0);
   assert.deepEqual(output.created_prs, {});
 
@@ -80,6 +82,7 @@ test('tracking issues group by ecosystem and major package or minor-patch, acros
   assert.doesNotMatch(minor.body, /### `(?:axios|vite|cryptography)`/);
   assert.match(minor.body, /\[#10\]\(https:\/\/example\.test\/10\)/);
   assert.match(minor.body, /## Reconciliation Notes\n\n    Manifest: package\.json/);
+  assert.doesNotMatch(minor.body, /DotnetSecurityFailures/);
   assert.ok(minor.body.indexOf('## Reconciliation Notes') >
     minor.body.indexOf('## Remediation Pull Requests'));
 
@@ -89,6 +92,9 @@ test('tracking issues group by ecosystem and major package or minor-patch, acros
   assert.ok(pipIssue.body.includes('- fastapi-sqlalchemy 0.2.1 → starlette 0.50.0'));
   assert.match(pipIssue.body, /\[#20\]\(https:\/\/example\.test\/20\)/);
   assert.doesNotMatch(pipIssue.body, /## Reconciliation Notes/);
+
+  const nugetIssue = created.find(i => i.title.includes('[nuget]'));
+  assert.doesNotMatch(nugetIssue.body, /## Reconciliation Notes|DotnetSecurityFailures/);
 
   assert.deepEqual(output.summary, remediationPlan.summary);
   assert.equal(output.stats.total_reviewed_prs, 9);
@@ -201,7 +207,7 @@ test('Summary section is renamed and shows a severity count table (critical/high
   assert.match(body, /\| 1 \| 2 \| 1 \| 1 \|/);
 });
 
-test('AC displays a distinct minimum upgradable version and omits matching minimum', async () => {
+test('AC labels higher minimum as upgrade candidate and omits matching minimum', async () => {
   const plan = (name, minimumVersion, targetVersion) => ({
     package: {
       name, ecosystem: 'npm', effective_severity: 'high',
@@ -216,6 +222,7 @@ test('AC displays a distinct minimum upgradable version and omits matching minim
   const raw = { groups: { high: { plans: [
     plan('sass', '1.99.0', '1.105.1'),
     plan('bootstrap-vue', '2.23.1', '2.23.1'),
+    plan('@vue/cli-plugin-typescript', '5.1.0', '5.0.9'),
   ] } } };
   const remediationPlan = { summary: { context: {} } };
   const created = [];
@@ -242,4 +249,5 @@ test('AC displays a distinct minimum upgradable version and omits matching minim
   assert.match(body, /Upgrade `sass` from `1\.0\.0` to `1\.105\.1` \[minimum version: 1\.99\.0\]/);
   assert.match(body, /Upgrade `bootstrap-vue` from `1\.0\.0` to `2\.23\.1`/);
   assert.doesNotMatch(body, /minimum version: 2\.23\.1/);
+  assert.match(body, /Upgrade `@vue\/cli-plugin-typescript` from `1\.0\.0` to `5\.0\.9` \[upgrade candidate: 5\.1\.0\]/);
 });

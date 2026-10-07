@@ -267,10 +267,31 @@ function buildAcceptanceCriteriaSection(plans) {
     const currentVersion = plan.package.current_version || 'unknown';
     const remediationVersion = plan.fix.upgrade_version || '—';
     const minimumVersion = plan.package.minimum_upgradable_version;
+    const versionNoteLabel = minimumVersion
+      && remediationVersion !== '—'
+      && compareVersions(minimumVersion, remediationVersion) > 0
+      ? 'upgrade candidate'
+      : 'minimum version';
     const minimumVersionNote = minimumVersion && minimumVersion !== remediationVersion
-      ? ` [minimum version: ${minimumVersion}]`
+      ? ` [${versionNoteLabel}: ${minimumVersion}]`
       : '';
     section += `- [ ] Upgrade \`${plan.package.name}\` from \`${currentVersion}\` to \`${remediationVersion}\`${minimumVersionNote}\n`;
+  }
+
+  function compareVersions(left, right) {
+    const parts = version => version.replace(/^[vV]/, '').split(/[.+-]/)
+      .map(part => /^\d+$/.test(part) ? Number(part) : part);
+    const leftParts = parts(left);
+    const rightParts = parts(right);
+    const length = Math.max(leftParts.length, rightParts.length);
+    for (let i = 0; i < length; i++) {
+      const a = leftParts[i] ?? 0;
+      const b = rightParts[i] ?? 0;
+      if (a === b) continue;
+      if (typeof a === 'number' && typeof b === 'number') return a - b;
+      return String(a).localeCompare(String(b));
+    }
+    return 0;
   }
   return section + '\n';
 }
@@ -320,8 +341,12 @@ function buildRemediationPRsSection(ecosystem, categoryMap, groupPlansSet, group
 }
 
 function buildReconciliationNotesSection(ecosystem) {
+  if (!['npm', 'npm_and_yarn', 'yarn'].includes((ecosystem || '').toLowerCase())) {
+    return '';
+  }
   const notes = (remediationPlan.reconciliation_info || [])
-    .filter(info => (info.ecosystem || '').toLowerCase() === ecosystem.toLowerCase())
+    .filter(info => ['npm', 'npm_and_yarn', 'yarn']
+      .includes((info.ecosystem || '').toLowerCase()))
     .map(info => (info.reconciliation_notes || '').trim())
     .filter(Boolean);
   if (notes.length === 0) return '';
