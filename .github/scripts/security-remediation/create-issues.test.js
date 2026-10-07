@@ -200,3 +200,46 @@ test('Summary section is renamed and shows a severity count table (critical/high
   assert.match(body, /\| Critical \| High \| Medium \| Low \|/);
   assert.match(body, /\| 1 \| 2 \| 1 \| 1 \|/);
 });
+
+test('AC displays a distinct minimum upgradable version and omits matching minimum', async () => {
+  const plan = (name, minimumVersion, targetVersion) => ({
+    package: {
+      name, ecosystem: 'npm', effective_severity: 'high',
+      unique_ghsas: [], current_version: '1.0.0', current_version_range: '1.0.0',
+      vulnerabilities: [{ ghsa_id: `GHSA-${name}`, summary: 'test vulnerability', cvss: 7.5 }],
+      minimum_upgradable_version: minimumVersion,
+    },
+    fix: { upgrade_version: targetVersion, fix_class: 'NON_BREAKING_BUMP' },
+    action: { action_type: 'open_issue' },
+    state: {},
+  });
+  const raw = { groups: { high: { plans: [
+    plan('sass', '1.99.0', '1.105.1'),
+    plan('bootstrap-vue', '2.23.1', '2.23.1'),
+  ] } } };
+  const remediationPlan = { summary: { context: {} } };
+  const created = [];
+  const github = { rest: {
+    search: { issuesAndPullRequests: async () => ({ data: { items: [] } }) },
+    issues: {
+      getLabel: async () => ({}), setLabels: async () => ({}), addLabels: async () => ({}),
+      update: async () => {},
+      create: async args => { created.push(args); return { data: { number: 1, html_url: 'https://example.test/issue' } }; },
+    },
+  } };
+  const fakeFs = {
+    readFileSync: file => JSON.stringify(file === 'orchestrator-output.json' ? remediationPlan : raw),
+    existsSync: () => true,
+    writeFileSync: () => {},
+  };
+  await new AsyncFunction('github', 'context', 'core', 'require', 'process', 'console', source)(
+    github, { repo: { owner: 'owner', repo: 'repo' }, serverUrl: 'https://github.com', runId: 1 },
+    { info() {}, warning(message) { throw new Error(message); } },
+    name => { assert.equal(name, 'fs'); return fakeFs; }, { env: { BASE_BRANCH: 'main' } }, console,
+  );
+
+  const body = created[0].body;
+  assert.match(body, /Upgrade `sass` from `1\.0\.0` to `1\.105\.1` \[minimum version: 1\.99\.0\]/);
+  assert.match(body, /Upgrade `bootstrap-vue` from `1\.0\.0` to `2\.23\.1`/);
+  assert.doesNotMatch(body, /minimum version: 2\.23\.1/);
+});

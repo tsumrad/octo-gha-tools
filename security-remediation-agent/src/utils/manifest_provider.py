@@ -26,6 +26,7 @@ LOCKFILE_NAMES = frozenset(
 
 NPM_ECOSYSTEMS = frozenset({"npm", "npm_and_yarn", "yarn"})
 PIP_ECOSYSTEMS = frozenset({"pip", "pypi", "python"})
+NUGET_ECOSYSTEMS = frozenset({"nuget"})
 
 NPM_DEPENDENCY_FIELDS = (
     "dependencies",
@@ -95,6 +96,71 @@ class ManifestProvider:
         self._declared.setdefault(key, {})[ecosystem] = declared
         return declared
 
+    async def repository_tree(
+        self,
+        owner: str,
+        repo: str,
+        ref: str | None = None,
+    ) -> list[dict[str, str]]:
+        """List repository files using the Git Trees API."""
+        if not self._token:
+            raise RuntimeError("GITHUB_TOKEN environment variable or token argument is required")
+        if ref is None:
+            repository_url = (
+                f"https://api.github.com/repos/{quote(owner, safe='')}/"
+                f"{quote(repo, safe='')}"
+            )
+            if self._client is not None:
+                response = await self._client.get(
+                    repository_url,
+                    headers={
+                        "Authorization": f"******",
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                )
+            else:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(
+                        repository_url,
+                        headers={
+                            "Authorization": "******",
+                            "Accept": "application/vnd.github+json",
+                            "X-GitHub-Api-Version": "2022-11-28",
+                        },
+                    )
+            response.raise_for_status()
+            ref = response.json().get("default_branch")
+            if not ref:
+                raise ValueError(
+                    f"Repository metadata did not include a default branch for {owner}/{repo}"
+                )
+        url = f"https://api.github.com/repos/{quote(owner, safe='')}/{quote(repo, safe='')}/git/trees/{quote(ref, safe='')}"
+        headers = {
+            "Authorization": "******",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        if self._client is not None:
+            response = await self._client.get(url, headers=headers, params={"recursive": "1"})
+        else:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url, headers=headers, params={"recursive": "1"})
+        response.raise_for_status()
+        data = response.json()
+        if data.get("truncated"):
+            raise ValueError(
+                "Repository Git tree is truncated; cannot safely resolve .NET project path"
+            )
+        entries = data.get("tree", [])
+        if not isinstance(entries, list):
+            raise ValueError("Git Trees API did not return a tree array")
+        return [
+            {"path": entry["path"]}
+            for entry in entries
+            if entry.get("type") == "blob" and entry.get("path")
+        ]
+
     @classmethod
     def _parse_declarations(
         cls, text: str | None, path: str, ecosystem: str
@@ -115,9 +181,47 @@ class ManifestProvider:
                     name: version
                     for name, version in cls._parse_pip_declarations(text, ecosystem)
                 }
+            if ecosystem in NUGET_ECOSYSTEMS:
+                return cls._parse_nuget_declarations(text)
         except (ValueError, AttributeError, TypeError) as exc:
             logger.warning("Cannot parse manifest %s: %s", path, exc)
         return {}
+
+    @classmethod
+    def _parse_nuget_declarations(cls, text: str) -> dict[str, str | None]:
+        """Read NuGet package references from project, props, or central props XML."""
+        import xml.etree.ElementTree as ET
+
+        try:
+            root = ET.fromstring(text)
+        except ET.ParseError as exc:
+            logger.warning("Cannot parse NuGet project manifest: %s", exc)
+            return {}
+
+        declarations: dict[str, str | None] = {}
+        for element in root.iter():
+            tag = element.tag.rsplit("}", 1)[-1]
+            if tag == "PackageReference":
+                name = element.attrib.get("Include") or element.attrib.get("Update")
+                version = element.attrib.get("Version")
+                if version is None:
+                    version = next(
+                        (
+                            child.text.strip()
+                            for child in element
+                            if child.tag.rsplit("}", 1)[-1] == "Version"
+                            and child.text
+                        ),
+                        None,
+                    )
+                if name:
+                    declarations[name.casefold()] = version
+            elif tag == "PackageVersion":
+                name = element.attrib.get("Include") or element.attrib.get("Update")
+                version = element.attrib.get("Version")
+                if name:
+                    declarations[name.casefold()] = version
+        return declarations
 
     @classmethod
     def _parse_pip_declarations(
