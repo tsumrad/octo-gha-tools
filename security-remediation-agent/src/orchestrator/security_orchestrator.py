@@ -1,11 +1,10 @@
 import logging
 
 from ..agents.vulnerability_reviewer_agent import VulnerabilityReviewerAgent
-from ..models.security_remediation_context import SecurityRemediationContext
-
+from ..models.remediation_plan import RemediationPlan
 from ..models.security_findings import SecurityFindings
 from ..models.security_package_triage import SecurityPackageTriage
-from ..models.remediation_plan import RemediationPlan
+from ..models.security_remediation_context import SecurityRemediationContext
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +63,9 @@ class SecurityOrchestrator:
         triage_items = await self._triage(repo, findings, remediation_context)
 
         remediation_plan = await self._plan(triage_items, remediation_context, repo)
-        return await self._review(remediation_plan, repo)
+        remediation_plan = await self._review(remediation_plan, repo)
+        await self._report(remediation_plan, repo)
+        return remediation_plan
 
 # ── Private step methods ───────────────────────────────────────────────────
 
@@ -115,6 +116,19 @@ class SecurityOrchestrator:
         except Exception as e:
             logger.error("Remediation review failed for %s: %s", repo, e)
             raise OrchestrationError("review", repo, e) from e
+
+    async def _report(
+        self,
+        remediation_plan: RemediationPlan,
+        repo: dict[str, str],
+    ) -> None:
+        if self.reporter is None:
+            return
+        try:
+            await self.reporter.report(remediation_plan, repo)
+        except Exception as e:
+            logger.error("Remediation report generation failed for %s: %s", repo, e)
+            raise OrchestrationError("report", repo, e) from e
 
 # ── Error ──────────────────────────────────────────────────────────────────────
 

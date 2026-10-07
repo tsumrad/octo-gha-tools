@@ -1,6 +1,5 @@
 import argparse
 import asyncio
-from asyncio.log import logger
 import json
 import logging
 import os
@@ -12,6 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from src.agents.remediation_planner_agent import RemediationPlannerAgent
+from src.agents.remediation_report_agent import RemediationReportAgent
 from src.agents.vulnerability_collector_agent import VulnerabilityCollectorAgent
 from src.agents.vulnerability_triage_agent import VulnerabilityTriageAgent
 from src.orchestrator.security_orchestrator import SecurityOrchestrator
@@ -81,6 +81,7 @@ async def async_main() -> None:
         VulnerabilityCollectorAgent(),
         triager,
         RemediationPlannerAgent(),
+        reporter=RemediationReportAgent(),
     )
 
     result = await orchestrator.run(repo)
