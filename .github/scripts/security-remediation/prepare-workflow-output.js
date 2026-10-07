@@ -47,7 +47,11 @@ function prepareOutput(raw, severities = 'critical,high,medium,low') {
       if (!selected.has(severity)) continue;
       const name = pkg.remediation_package;
       const ecosystem = pkg.ecosystem || bundleEcosystem;
-      const target = pkg.remediation_version || '';
+      const remediationVersion = pkg.remediation_version || '';
+      const upgradeToVersion = pkg.upgrade_to_version || '';
+      const versions = [remediationVersion, upgradeToVersion].filter(Boolean);
+      const minimumVersion = versions.sort(compareVersions)[0] || '';
+      const target = versions.sort(compareVersions).at(-1) || '';
       const isbreakable = isBreakablePackage(pkg);
       const relationship = isTransitivePackage(pkg) ? 'transitive' : 'direct';
       // Only reuse a PR whose package and target match the planned upgrade.
@@ -59,8 +63,11 @@ function prepareOutput(raw, severities = 'critical,high,medium,low') {
       const actionType = ['rollup_pr', 'standalone_pr'].includes(action) && !pr ? 'placeholder_pr' : action;
       const advisories = [...new Set(vulnerabilities.map(v => v.ghsa_id).filter(Boolean))];
       const dependencyOccurrences = (pkg.packages || []).flatMap(p => p.transitive_dependency_occurrences || []);
+      const minimumVersionNote = minimumVersion && minimumVersion !== target
+        ? ` [minimum version: ${minimumVersion}]`
+        : '';
       const markdown = `### ${name} (${ecosystem})\n\n` +
-        `- [ ] **AC:** Upgrade \`${name}\` from \`${pkg.current_version || 'unknown'}\` to \`${target || 'no known fix'}\` ` +
+        `- [ ] **AC:** Upgrade \`${name}\` from \`${pkg.current_version || 'unknown'}\` to \`${target || 'no known fix'}\`${minimumVersionNote} ` +
         `(${relationship}, ${isbreakable ? 'breaking' : 'non-breaking'}). Resolve ${advisories.join(', ') || 'the reported vulnerabilities'} and run the project tests.\n`;
       const plan = {
         plan_id: `${raw.plan_id || 'plan'}-${bundleIndex}-${packageIndex}`,
@@ -87,6 +94,20 @@ function prepareOutput(raw, severities = 'critical,high,medium,low') {
         bundle: { groupName: bundle.groupName || 'default', ecosystem: bundleEcosystem, severity: bundle.severity || null },
       };
       (groups[severity] ||= { plans: [] }).plans.push(plan);
+    }
+
+    function compareVersions(left, right) {
+      const leftParts = left.replace(/^[vV]/, '').split(/[.+-]/).map(part => /^\d+$/.test(part) ? Number(part) : part);
+      const rightParts = right.replace(/^[vV]/, '').split(/[.+-]/).map(part => /^\d+$/.test(part) ? Number(part) : part);
+      const length = Math.max(leftParts.length, rightParts.length);
+      for (let i = 0; i < length; i++) {
+        const a = leftParts[i] ?? 0;
+        const b = rightParts[i] ?? 0;
+        if (a === b) continue;
+        if (typeof a === 'number' && typeof b === 'number') return a - b;
+        return String(a).localeCompare(String(b));
+      }
+      return 0;
     }
   }
   // Authoritative severity counts come from the orchestrator's
