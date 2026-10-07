@@ -29,6 +29,20 @@ function isBreakablePackage(remediationPackage) {
   return ownPackageContexts(remediationPackage).some(pkg => pkg.isbreakable === true);
 }
 
+function compareVersions(left, right) {
+  const leftParts = left.replace(/^[vV]/, '').split(/[.+-]/).map(part => /^\d+$/.test(part) ? Number(part) : part);
+  const rightParts = right.replace(/^[vV]/, '').split(/[.+-]/).map(part => /^\d+$/.test(part) ? Number(part) : part);
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let i = 0; i < length; i++) {
+    const a = leftParts[i] ?? 0;
+    const b = rightParts[i] ?? 0;
+    if (a === b) continue;
+    if (typeof a === 'number' && typeof b === 'number') return a - b;
+    return String(a).localeCompare(String(b));
+  }
+  return 0;
+}
+
 function prepareOutput(raw, severities = 'critical,high,medium,low') {
   if (!raw || !Array.isArray(raw.remediation_plan_bundles)) {
     throw new Error('Expected orchestrator RemediationPlan.remediation_plan_bundles array');
@@ -50,8 +64,9 @@ function prepareOutput(raw, severities = 'critical,high,medium,low') {
       const remediationVersion = pkg.remediation_version || '';
       const upgradeToVersion = pkg.upgrade_to_version || '';
       const versions = [remediationVersion, upgradeToVersion].filter(Boolean);
-      const minimumVersion = versions.sort(compareVersions)[0] || '';
-      const target = versions.sort(compareVersions).at(-1) || '';
+      versions.sort(compareVersions);
+      const minimumVersion = versions[0] || '';
+      const target = versions.at(-1) || '';
       const isbreakable = isBreakablePackage(pkg);
       const relationship = isTransitivePackage(pkg) ? 'transitive' : 'direct';
       // Only reuse a PR whose package and target match the planned upgrade.
@@ -94,20 +109,6 @@ function prepareOutput(raw, severities = 'critical,high,medium,low') {
         bundle: { groupName: bundle.groupName || 'default', ecosystem: bundleEcosystem, severity: bundle.severity || null },
       };
       (groups[severity] ||= { plans: [] }).plans.push(plan);
-    }
-
-    function compareVersions(left, right) {
-      const leftParts = left.replace(/^[vV]/, '').split(/[.+-]/).map(part => /^\d+$/.test(part) ? Number(part) : part);
-      const rightParts = right.replace(/^[vV]/, '').split(/[.+-]/).map(part => /^\d+$/.test(part) ? Number(part) : part);
-      const length = Math.max(leftParts.length, rightParts.length);
-      for (let i = 0; i < length; i++) {
-        const a = leftParts[i] ?? 0;
-        const b = rightParts[i] ?? 0;
-        if (a === b) continue;
-        if (typeof a === 'number' && typeof b === 'number') return a - b;
-        return String(a).localeCompare(String(b));
-      }
-      return 0;
     }
   }
   // Authoritative severity counts come from the orchestrator's
