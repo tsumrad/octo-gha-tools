@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from typing import Any
 
-import httpx
-
 from ..models.remediation_plan import RemeditionPackage, RemeditionPackageBundle
+from ..utils.manifest_provider import ManifestProvider
 
 logger = logging.getLogger(__name__)
 
@@ -128,9 +126,7 @@ class RemediationGroupingEngine:
         paths: list[str] | None = None,
     ) -> dict[str, Any]:
         """Fetch and parse the repository's renovate.json5 (or renovate.json) config."""
-        from ..tools.github_manifest_fetcher import ManifestFetcher
-
-        fetcher = ManifestFetcher(token=os.getenv("GITHUB_TOKEN"))
+        manifest_provider = ManifestProvider()
         candidates = paths or [
             "renovate.json5",
             ".github/renovate.json5",
@@ -138,12 +134,9 @@ class RemediationGroupingEngine:
             ".github/renovate.json",
         ]
 
-        last_error: Exception | None = None
         for path in candidates:
-            try:
-                content = await fetcher.fetch(owner, repo, path, ref)
-            except (httpx.HTTPStatusError, ValueError, RuntimeError) as exc:
-                last_error = exc
+            content = await manifest_provider.get(owner, repo, path, ref)
+            if content is None:
                 continue
 
             logger.info("Fetched renovate config content from %s/%s at path %s", owner, repo, path)
@@ -155,8 +148,6 @@ class RemediationGroupingEngine:
                 # trying other candidate paths.
                 raise ValueError(f"Failed to parse renovate config at {owner}/{repo}:{path}") from exc
 
-        if last_error is not None:
-            raise last_error
         return {}
 
     @staticmethod

@@ -418,26 +418,11 @@ def get_version_bumps(
     else:
         category = "unknown"
 
-    logger.info(
-        "Extracting version bumps: user=%s category=%s",
-        user,
-        category,
-    )
-
     bumps = extract_from_body(
         category,
         body,
     )
 
-    logger.info(
-        "Found %s version bump(s) in PR body",
-        len(bumps),
-    )
-
-    logger.info(
-        "Bumps: %s",
-        bumps,
-    )
 
     if bumps:
         return bumps

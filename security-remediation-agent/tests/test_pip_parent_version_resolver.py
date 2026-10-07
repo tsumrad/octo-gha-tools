@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 
-from src.engines.version_resolver.pip_parent_version_resolver import (
+from src.engines.recommendation_resolver.pip_parent_version_resolver import (
     ParentVersionShortlister,
     PipParentVersionResolver,
     PyPiMetadataClient,
@@ -49,8 +49,8 @@ class ParentVersionShortlisterTest(unittest.IsolatedAsyncioTestCase):
 
 
 class VenvInstallVerifierTest(unittest.TestCase):
-    @patch("src.engines.version_resolver.pip_parent_version_resolver.subprocess.run")
-    @patch("src.engines.version_resolver.pip_parent_version_resolver.venv.EnvBuilder")
+    @patch("src.engines.recommendation_resolver.pip_parent_version_resolver.subprocess.run")
+    @patch("src.engines.recommendation_resolver.pip_parent_version_resolver.venv.EnvBuilder")
     def test_verify_confirms_safe_child_version(self, env_builder_cls, run):
         env_builder_cls.return_value.create.return_value = None
         install_result = MagicMock(returncode=0)
@@ -67,8 +67,8 @@ class VenvInstallVerifierTest(unittest.TestCase):
 
         self.assertEqual(result, "0.50.0")
 
-    @patch("src.engines.version_resolver.pip_parent_version_resolver.subprocess.run")
-    @patch("src.engines.version_resolver.pip_parent_version_resolver.venv.EnvBuilder")
+    @patch("src.engines.recommendation_resolver.pip_parent_version_resolver.subprocess.run")
+    @patch("src.engines.recommendation_resolver.pip_parent_version_resolver.venv.EnvBuilder")
     def test_verify_rejects_still_vulnerable_child_version(self, env_builder_cls, run):
         env_builder_cls.return_value.create.return_value = None
         install_result = MagicMock(returncode=0)
@@ -85,8 +85,8 @@ class VenvInstallVerifierTest(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    @patch("src.engines.version_resolver.pip_parent_version_resolver.subprocess.run")
-    @patch("src.engines.version_resolver.pip_parent_version_resolver.venv.EnvBuilder")
+    @patch("src.engines.recommendation_resolver.pip_parent_version_resolver.subprocess.run")
+    @patch("src.engines.recommendation_resolver.pip_parent_version_resolver.venv.EnvBuilder")
     def test_verify_returns_none_on_install_failure(self, env_builder_cls, run):
         env_builder_cls.return_value.create.return_value = None
         run.return_value = MagicMock(returncode=1, stderr="no matching distribution")
@@ -126,6 +126,33 @@ class PipParentVersionResolverTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(result.resolved)
         self.assertIsNone(result.resolved_version)
+
+    async def test_resolve_prefers_highest_verified_non_breaking_candidate(self):
+        shortlister = MagicMock(spec=ParentVersionShortlister)
+        shortlister.shortlist = AsyncMock(return_value=[
+            MagicMock(version="3.0.0"),
+            MagicMock(version="1.9.0"),
+            MagicMock(version="1.5.0"),
+        ])
+        verifier = MagicMock(spec=VenvInstallVerifier)
+        verifier.verify.return_value = "0.50.0"
+
+        resolver = PipParentVersionResolver(shortlister=shortlister, verifier=verifier)
+        result = await resolver.resolve(
+            "fastapi",
+            "starlette",
+            "0.40.0",
+            current_parent_version="1.0.0",
+        )
+
+        self.assertEqual(result.resolved_version, "1.9.0")
+        self.assertEqual(result.minimum_upgradable_version, "1.9.0")
+        verifier.verify.assert_called_once_with(
+            "fastapi",
+            "1.9.0",
+            "starlette",
+            "0.40.0",
+        )
 
 
 class PyPiMetadataClientTest(unittest.IsolatedAsyncioTestCase):

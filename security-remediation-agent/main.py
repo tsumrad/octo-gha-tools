@@ -76,12 +76,11 @@ async def async_main() -> None:
 
     repo = {"owner": args.owner, "name": normalize_repo_name(args.repo)}
 
+    triager = VulnerabilityTriageAgent()
     orchestrator = SecurityOrchestrator(
         VulnerabilityCollectorAgent(),
-        VulnerabilityTriageAgent(),
+        triager,
         RemediationPlannerAgent(),
-        reviewer=None,
-        reporter=None,
     )
 
     result = await orchestrator.run(repo)

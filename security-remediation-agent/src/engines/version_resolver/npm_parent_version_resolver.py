@@ -39,6 +39,7 @@ class NpmParentResolution:
     parent: str
     child: str
     resolved_version: str | None = None
+    minimum_upgradable_version: str | None = None
     installed_child_versions: list[str] = field(default_factory=list)
     candidates_considered: list[str] = field(default_factory=list)
     source: str = "npm_registry_fallback"
@@ -58,6 +59,22 @@ def _parse_version(raw: str | None) -> Version | None:
         return Version(raw.lstrip("vV"))
     except InvalidVersion:
         return None
+
+
+def _maximum_non_breaking_version(
+    current_version: str | None,
+    candidates: list[str],
+) -> str | None:
+    current = _parse_version(current_version)
+    if current is None:
+        return None
+    same_major = [
+        (parsed, candidate)
+        for candidate in candidates
+        if (parsed := _parse_version(candidate)) is not None
+        and parsed.major == current.major
+    ]
+    return max(same_major)[1] if same_major else None
 
 
 def _is_vulnerable(version: str, vulnerable_range: str) -> bool:
@@ -157,6 +174,7 @@ class NpmMetadataClient:
         vulnerable_range: str,
         current_parent_version: str | None,
         fixed_version: str | None = None,
+        node_version: str | None = None,
     ) -> tuple[list[str], bool, bool]:
         """Return candidates, direct-proof flag, and lockfile-refresh flag.
 
@@ -172,6 +190,20 @@ class NpmMetadataClient:
             if parsed is None or parsed.is_prerelease or manifest.get("deprecated"):
                 continue
             if current is not None and parsed <= current:
+                continue
+            node_requirement = (manifest.get("engines") or {}).get("node")
+            if (
+                node_version
+                and isinstance(node_requirement, str)
+                and not self._range_accepts(node_requirement, node_version)
+            ):
+                logger.info(
+                    "Skipping %s@%s: Node %s does not satisfy engines.node %s",
+                    parent,
+                    raw,
+                    node_version,
+                    node_requirement,
+                )
                 continue
             releases.append((parsed, raw, manifest))
         releases.sort(key=lambda entry: entry[0])
@@ -206,7 +238,13 @@ class NpmMetadataClient:
                 direct.append(raw)
 
         selected = direct if saw_direct else all_versions
-        if current_accepts_safe_child and current_parent_version:
+        current_node_requirement = (current_manifest.get("engines") or {}).get("node")
+        current_supports_node = not (
+            node_version
+            and isinstance(current_node_requirement, str)
+            and not self._range_accepts(current_node_requirement, node_version)
+        )
+        if current_accepts_safe_child and current_parent_version and current_supports_node:
             selected.insert(0, current_parent_version)
         return selected, (saw_direct or current_accepts_safe_child), current_accepts_safe_child
 
@@ -246,6 +284,24 @@ class NpmLockVerifier:
     @property
     def available(self) -> bool:
         return self.executable() is not None
+
+    def node_version(self) -> str | None:
+        node = shutil.which("node") or shutil.which("node.exe")
+        if node is None:
+            return None
+        result = subprocess.run(
+            [node, "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=self.timeout_seconds,
+            env={**os.environ, "NO_COLOR": "1"},
+        )
+        if result.returncode != 0:
+            logger.warning("Cannot determine Node version: %s", result.stderr.strip())
+            return None
+        return result.stdout.strip().lstrip("vV") or None
 
     def verify(
         self,
@@ -315,7 +371,6 @@ class NpmLockVerifier:
             )
             return not remains, versions
 
-
 class NpmParentVersionResolver:
     """Select from registry metadata and optionally verify a few candidates."""
 
@@ -363,13 +418,28 @@ class NpmParentVersionResolver:
         current_parent_version: str | None,
         fixed_version: str | None = None,
     ) -> NpmParentResolution:
+        node_version_loader = getattr(self.verifier, "node_version", None)
+        node_version = (
+            await asyncio.to_thread(node_version_loader)
+            if callable(node_version_loader)
+            else None
+        )
         candidates, direct_inference, lockfile_refresh = await metadata.select_candidates(
-            parent, child, vulnerable_range, current_parent_version, fixed_version
+            parent,
+            child,
+            vulnerable_range,
+            current_parent_version,
+            fixed_version,
+            node_version=node_version,
         )
         result = NpmParentResolution(
             parent=parent,
             child=child,
             candidates_considered=candidates,
+            minimum_upgradable_version=_maximum_non_breaking_version(
+                current_parent_version,
+                candidates,
+            ),
         )
         if not candidates:
             result.action = "manual_remediation"

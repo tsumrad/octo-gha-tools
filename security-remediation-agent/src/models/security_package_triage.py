@@ -2,9 +2,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
 
-from ..tools.model.pull_request_metadata import PullRequestMetadata
+from .gh.pull_request_metadata import PullRequestMetadata
 
-from ..tools.model.vulnerability_alert import VulnerabilityAlert
+from .gh.vulnerability_alert import VulnerabilityAlert
 
 
 class OccurrenceClassification(str, Enum):
@@ -65,15 +65,19 @@ class PackageUpgradeRecommendation:
     pr_number: Optional[int] = None
     pull_url: Optional[str] = None
     pr_branch: Optional[str] = None
+    minimum_upgradable_version: str = ""
+    candidate_versions: list[str] = field(default_factory=list)
 
 @dataclass
 class SecurityPackageTriage:
     #Source: Vulnerability alert
     package: str
-    vulnerable_version_range: str
-    remediated_version: str
+    vulnerablility_version_range: str
+    vulnerablility_fixed_version: str
     current_version: str = ""
     ecosystem: str = ""
+    manifest_path: str | None = None
+    #derivative information
     severity: str = ""
 
     #Source: Vulnerability alert and code scanning
@@ -85,11 +89,6 @@ class SecurityPackageTriage:
     # component relationship    
     transitive_dependency_occurrences: list[TransistiveOccurances] = field(default_factory=list)
     package_upgrade_recommendations: list[PackageUpgradeRecommendation] = field(default_factory=list)
-
-    #Direct dependency remediation details
-    fixed_minimum_version: str = ""
-    fixed_maximum_version: str = ""
-    upgrade_to_version: str = ""
 
     #pulls - remediation & update consolidation
     is_pull_available: bool = False

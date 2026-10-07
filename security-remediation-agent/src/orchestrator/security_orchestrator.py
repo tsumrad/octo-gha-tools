@@ -1,8 +1,6 @@
 import logging
-from datetime import datetime
-from typing import Protocol, runtime_checkable
 
-from ..models.triage_result import TriageResult
+from ..agents.vulnerability_reviewer_agent import VulnerabilityReviewerAgent
 from ..models.security_remediation_context import SecurityRemediationContext
 
 from ..models.security_findings import SecurityFindings
@@ -18,17 +16,26 @@ class SecurityOrchestrator:
         vulnerabilityCollectorAgent,
         vulnerabilityTriageAgent,
         remediationPlanningAgent,
-        reviewer,
-        reporter,
+        reviewer=None,
+        reporter=None,
     ) -> None:
         self.vulnerability_collector = vulnerabilityCollectorAgent
         self.triager = vulnerabilityTriageAgent
         self.remediation_planner = remediationPlanningAgent
-        self.reviewer = reviewer
+        recommendation_resolver = getattr(
+            vulnerabilityTriageAgent,
+            "package_recommendation_resolver",
+            None,
+        )
+        resolver_factory = getattr(recommendation_resolver, "resolver_factory", None)
+        self.reviewer = reviewer or VulnerabilityReviewerAgent(
+            resolver_factory=resolver_factory,
+            max_dry_run_adjustments=10,
+            legacy_peer_deps=True,
+        )
         self.reporter = reporter
 
-    async def run(self, repo: str) -> TriageResult:
-        started_at = datetime.utcnow()
+    async def run(self, repo: dict[str, str]) -> RemediationPlan:
         logger.info("Orchestration started for %s", repo) 
         #Context object
         remediation_context = SecurityRemediationContext(
@@ -43,7 +50,7 @@ class SecurityOrchestrator:
 
         if findings.is_empty():
             logger.info("No vulnerabilities found for %s", repo)
-            return None
+            return RemediationPlan(summary=remediation_context)
 
         logger.info(
             "Collected %d findings for %s (Dependabot: %d, retained code-scanning: %d)",
@@ -54,44 +61,30 @@ class SecurityOrchestrator:
         )
         
         # ── Step 2: Triage ─────────────────────────────────────────────────────
-        triage_result: TriageResult = await self._triage(repo, findings, remediation_context)
-        #logger.info("Triage complete — %d packages", len(triage_result.remediation_plans))
+        triage_items = await self._triage(repo, findings, remediation_context)
 
-        # ── Step 3: Build remediation plans ────────────────────────────────────
-        bundle = await self._plan(triage_result, remediation_context, repo)
-        #logger.info("Built %d remediation plans", len(bundle.remediation_plans))
-        
-        # for plan in bundle.remediation_plans:
-        #     logger.info("Remediation plan: %s (%d packages)", plan.ecosystem, len(plan.packages))
-        #     for package in plan.packages:
-        #         logger.info("  Package: %s (%d vulnerabilities, %d pull requests, %s)", package.name, len(package.vulnerabilities), len(package.pull_requests), package.relationship)
-
-        # # ── Step 4: LLM Review ─────────────────────────────────────────────────────
-        # review = await self._review(bundle)
-        # logger.info(
-        #     "Review complete — approved=%d flagged=%d",
-        #     len(review.approved),
-        #     len(review.flagged),
-        # )
-
-        # # ── Step 5: Report ─────────────────────────────────────────────────────
-        # report = await self._report(review)
-        # report.started_at  = started_at
-        # report.finished_at = datetime.utcnow()
-
-        # logger.info("Orchestration complete: %s", report.summary())
-        return bundle
+        remediation_plan = await self._plan(triage_items, remediation_context, repo)
+        return await self._review(remediation_plan, repo)
 
 # ── Private step methods ───────────────────────────────────────────────────
 
-    async def _collect(self, repo: str, context: SecurityRemediationContext) -> SecurityFindings:
+    async def _collect(
+        self,
+        repo: dict[str, str],
+        context: SecurityRemediationContext,
+    ) -> SecurityFindings:
         try:
             return await self.vulnerability_collector.collect(repo, context)
         except Exception as e:
             logger.error("Collection failed for %s: %s", repo, e)
             raise OrchestrationError("collect", repo, e) from e
 
-    async def _triage(self, repo: str, security_findings: SecurityFindings, context: SecurityRemediationContext) -> TriageResult:
+    async def _triage(
+        self,
+        repo: dict[str, str],
+        security_findings: SecurityFindings,
+        context: SecurityRemediationContext,
+    ) -> list[SecurityPackageTriage]:
         try:
             return await self.triager.triage(repo, security_findings, context)
         except Exception as e:
@@ -100,30 +93,28 @@ class SecurityOrchestrator:
 
     async def _plan(
         self,
-        triage_result: TriageResult,
+        triage_items: list[SecurityPackageTriage],
         context: SecurityRemediationContext,
-        repo: str,
+        repo: dict[str, str],
     ) -> RemediationPlan:
         try:
-            return await self.remediation_planner.plan(triage_result, context, repo)
+            return await self.remediation_planner.plan(triage_items, context, repo)
         except Exception as e:
             logger.error("Remediation planning failed: %s", e)
             raise OrchestrationError("remediation", None, e) from e
 
-    # async def _review(self, bundle: TriageResult) -> ReviewResult:
-    #     try:
-    #         return await self.review_agent.review(bundle)
-    #     except Exception as e:
-    #         logger.error("Review failed: %s", e)
-    #         raise OrchestrationError("review", None, e) from e
-
-    # async def _report(self, review: ReviewResult) -> OrchestrationReport:
-    #     try:
-    #         return await self.reporter.report(review)
-    #     except Exception as e:
-    #         logger.error("Reporting failed: %s", e)
-    #         raise OrchestrationError("report", None, e) from e
-
+    async def _review(
+        self,
+        remediation_plan: RemediationPlan,
+        repo: dict[str, str],
+    ) -> RemediationPlan:
+        if self.reviewer is None:
+            return remediation_plan
+        try:
+            return await self.reviewer.review(remediation_plan, repo)
+        except Exception as e:
+            logger.error("Remediation review failed for %s: %s", repo, e)
+            raise OrchestrationError("review", repo, e) from e
 
 # ── Error ──────────────────────────────────────────────────────────────────────
 

@@ -1,5 +1,4 @@
 import logging
-import uuid
 
 from ..engines.remediation_grouping_engine import RemediationGroupingEngine
 from ..models.remediation_plan import (
@@ -7,22 +6,41 @@ from ..models.remediation_plan import (
     RemeditionPackage,
     RemeditionPackageBundle,
 )
-from ..models.security_package_triage import SecurityPackageTriage, is_direct_occurrence
+from ..models.security_package_triage import SecurityPackageTriage
 from ..models.security_remediation_context import SecurityRemediationContext
-from ..models.triage_result import PackageContext, TriageResult
-from ..tools.remediation_planning_tool import build_remediation_plan
 from packaging.version import InvalidVersion, Version
 
 logger = logging.getLogger(__name__)
 
 
 class RemediationPlannerAgent:
-    def __init__(self) -> None:
-        self.tools = [build_remediation_plan]
+    @staticmethod
+    def _is_non_breaking(current_version: str, candidate_version: str) -> bool:
+        try:
+            return (
+                Version(current_version.lstrip("vV")).major
+                == Version(candidate_version.lstrip("vV")).major
+            )
+        except InvalidVersion:
+            return False
 
     @staticmethod
-    def _merge_packages(target: RemeditionPackage, package: PackageContext) -> None:
-        if any(existing.name == package.name for existing in target.packages):
+    def _highest_version(first: str, second: str) -> str:
+        if not first:
+            return second
+        if not second:
+            return first
+        try:
+            return str(max(Version(first.lstrip("vV")), Version(second.lstrip("vV"))))
+        except InvalidVersion:
+            return first
+
+    @staticmethod
+    def _merge_packages(
+        target: RemeditionPackage,
+        package: SecurityPackageTriage,
+    ) -> None:
+        if any(existing.package == package.package for existing in target.packages):
             return
         target.packages.append(package)
 
@@ -37,17 +55,26 @@ class RemediationPlannerAgent:
     def _merge_remediation_packages(target: RemeditionPackage, source: RemeditionPackage) -> None:
         """Fold a duplicate RemeditionPackage entry (same remediation_package name)
         into the first one seen for that name, keeping the highest remediation
-        version and merging their PackageContext/PR lists.
+        version and merging their triage-package/PR lists.
         """
         for package in source.packages:
-            if not any(existing.name == package.name for existing in target.packages):
+            if not any(
+                existing.package == package.package
+                for existing in target.packages
+            ):
                 target.packages.append(package)
         RemediationPlannerAgent._merge_pull_requests(target, source.remediation_prs)
 
         if not target.current_version and source.current_version:
             target.current_version = source.current_version
-        if not target.remediation_version and source.remediation_version:
-            target.remediation_version = source.remediation_version
+        target.remediation_version = RemediationPlannerAgent._highest_version(
+            target.remediation_version,
+            source.remediation_version,
+        )
+        target.minimum_upgradable_version = RemediationPlannerAgent._highest_version(
+            target.minimum_upgradable_version,
+            source.minimum_upgradable_version,
+        )
 
     @staticmethod
     def _dedupe_bundle_packages(
@@ -132,72 +159,76 @@ class RemediationPlannerAgent:
                 )
                 else "MINOR/PATCH"
             )
-
-           
+         
     async def plan(
         self,
-        triage_result: TriageResult,
+        triage_items: list[SecurityPackageTriage],
         context: SecurityRemediationContext,
         repo: dict | None = None,
     ) -> RemediationPlan:
         logger.info(
-            "Planning remediation for triage result with %d remediation plans",
-            len(triage_result.remediation_plans),
+            "Planning remediation for %d triage items",
+            len(triage_items),
         )
 
         direct_remediation_packages: list[RemeditionPackage] = []
         transitive_remediation_packages: list[RemeditionPackage] = []
         unique_update_packages: dict[str, RemeditionPackage] = {}
-
-        for plan in triage_result.remediation_plans:
-            for package in plan.packages:
-                if package.is_direct:     
-                    logger.info("Direct Package: %s", package.name)               
-                    direct_remediation_packages.append(
-                        RemeditionPackage(
-                            remediation_package=package.name,
-                            ecosystem=package.ecosystem,
-                            current_version=package.current_version,
-                            remediation_version=package.fixed_minimum_version,
-                            packages=[package],
-                            remediation_prs=list(package.pull_requests),
-                        )
+        for package in triage_items:
+            if not package.istransitive:
+                logger.info("Direct Package: %s", package.package)
+                direct_remediation_packages.append(
+                    RemeditionPackage(
+                        remediation_package=package.package,
+                        ecosystem=package.ecosystem,
+                        current_version=package.current_version,
+                        remediation_version=package.vulnerablility_fixed_version,
+                        minimum_upgradable_version=(
+                            package.vulnerablility_fixed_version
+                            if self._is_non_breaking(
+                                package.current_version,
+                                package.vulnerablility_fixed_version,
+                            )
+                            else ""
+                        ),
+                        packages=[package],
+                        remediation_prs=list(package.pull_request_metadata),
                     )
-                    continue
-
-                logger.info(
-                    "Transitive package: %s | current_version: %s | vulnerabilities: %d",
-                    package.name,
-                    package.current_version,
-                    len(package.vulnerabilities),
                 )
+                continue
 
-                for occurrence in package.package_upgrade_recommendations:
-                    key = occurrence.package
-                    # For a transitive RemeditionPackage, the "package" being
-                    # remediated here IS the introducer (occurrence.package),
-                    # not the vulnerable child (package.name). Its
-                    # current_version must reflect the introducer's own
-                    # installed version (occurrence.from_version, resolved
-                    # from the lockfile/manifest ancestor), not the child
-                    # vulnerable package's current_version -- otherwise the
-                    # bundle shows e.g. "@vue/cli-service" upgrading from the
-                    # child dependency's version instead of its own.
-                    if key not in unique_update_packages:
-                        unique_update_packages[key] = RemeditionPackage(
-                            remediation_package=key,
-                            ecosystem=package.ecosystem,
-                            current_version=occurrence.from_version or package.current_version,
-                            remediation_version=occurrence.to_version,
-                            packages=[package],
-                            remediation_prs=list(package.pull_requests),
-                        )
-                    else:
-                        update_package = unique_update_packages[key]
-                        self._merge_packages(update_package, package)
-                        self._merge_pull_requests(update_package, package.pull_requests)
-                        if not update_package.current_version and occurrence.from_version:
-                            update_package.current_version = occurrence.from_version
+            # logger.info(
+            #     "Transitive package: %s | current_version: %s | vulnerabilities: %d",
+            #     package.package,
+            #     package.current_version,
+            #     len(package.vulnerabilities),
+            # )
+
+            for recommendation in package.package_upgrade_recommendations:
+                key = recommendation.package
+                if key not in unique_update_packages:
+                    unique_update_packages[key] = RemeditionPackage(
+                        remediation_package=key,
+                        ecosystem=package.ecosystem,
+                        current_version=(
+                            recommendation.from_version or package.current_version
+                        ),
+                        remediation_version=recommendation.to_version,
+                        minimum_upgradable_version=(
+                            recommendation.minimum_upgradable_version
+                        ),
+                        packages=[package],
+                        remediation_prs=list(package.pull_request_metadata),
+                    )
+                else:
+                    update_package = unique_update_packages[key]
+                    self._merge_packages(update_package, package)
+                    self._merge_pull_requests(
+                        update_package,
+                        package.pull_request_metadata,
+                    )
+                    if not update_package.current_version and recommendation.from_version:
+                        update_package.current_version = recommendation.from_version
 
         transitive_remediation_packages = list(unique_update_packages.values())
 
@@ -207,18 +238,5 @@ class RemediationPlannerAgent:
             remediation_plan_bundles=remediation_plan_bundles,
             summary= context,
         )
-
-        for bundle in remediation_plan_bundles:
-            logger.info(
-                "Remediation bundle: %s (%s) (%d packages)", bundle.groupName, bundle.ecosystem, len(bundle.packages)
-            )
-            for package in bundle.packages:
-                logger.info(
-                    "  Package: %s | current_version: %s | remediation_version: %s | remediation_prs: %d",
-                    package.remediation_package,
-                    package.current_version,
-                    package.remediation_version,
-                    len(package.remediation_prs),
-                )
+        
         return plan_result
-

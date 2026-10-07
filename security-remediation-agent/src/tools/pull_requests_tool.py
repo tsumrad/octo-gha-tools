@@ -1,5 +1,4 @@
 from asyncio.log import logger
-import logging
 import os
 from typing import Any
 
@@ -12,7 +11,7 @@ from src.tools.dependabot_alerts_tool import (
     PER_PAGE,
     get_next_link,
 )
-from src.tools.model.pull_request_metadata import PullRequestMetadata, build_pull_request_metadata
+from ..models.gh.pull_request_metadata import PullRequestMetadata, build_pull_request_metadata
 
 GitHubObject = dict[str, Any]
 
@@ -108,9 +107,9 @@ async def pull_requests_tool(
         if not pull_request.get("number"):
             continue
 
-        logger.info("Processing ss pull request #%d ", pull_request.get("number"))
-        # if "bot" not in user.lower():
-        #     continue
+        user_ = pull_request.get("user", {}).get("login", "") 
+        if "bot" not in user_.lower():
+            continue
 
         metadata_list.append(
             build_pull_request_metadata(

@@ -6,7 +6,7 @@ import httpx
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-from src.tools.model.codescanning_alert import CodescanningAlert
+from ..models.gh.codescanning_alert import CodescanningAlert
 
 from src.tools.dependabot_alerts_tool import (
     GITHUB_API_VERSION,

@@ -7,9 +7,11 @@ import httpx
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
 
-from src.tools.model.vulnerability_alert import VulnerabilityAlert
+from ..models.gh.vulnerability_alert import VulnerabilityAlert
+from ..models.security_remediation_constants import SecurityRemediationConstants
 
-DEFAULT_SEVERITIES = frozenset({"critical", "high", "medium", "low"})
+DEFAULT_SEVERITIES = SecurityRemediationConstants.DEFAULT_SEVERITIES
+
 GITHUB_API_VERSION = "2022-11-28"
 PER_PAGE = 100
 NEXT_LINK_PATTERN = re.compile(r'<([^>]+)>;\s*rel="next"')
@@ -35,7 +37,7 @@ class DependabotAlertInput(BaseModel):
             return severities
 
         normalized = [normalize_severity(severity) for severity in severities]
-        invalid_severities = set(normalized) - DEFAULT_SEVERITIES
+        invalid_severities = set(normalized) -DEFAULT_SEVERITIES
         if invalid_severities:
             valid_values = ", ".join(sorted(DEFAULT_SEVERITIES))
             invalid_values = ", ".join(sorted(invalid_severities))

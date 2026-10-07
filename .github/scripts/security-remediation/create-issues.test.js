@@ -28,10 +28,15 @@ test('tracking issues group by ecosystem and major package or minor-patch, acros
   raw.groups.high.plans[0].action = { action_type: 'rollup_pr', pr_number: 11, pull_url: 'https://example.test/11' };
   raw.groups.medium.plans[4].action = { action_type: 'rollup_pr', pr_number: 20, pull_url: 'https://example.test/20' };
 
-  const remediationPlan = { summary: { context: {
-    total_vulnerabilities: 61, total_code_scanning_alerts: 3,
-    total_reviewed_prs: 9, total_ignored_prs: 8, total_remediation_prs: 1,
-  }, ecosystem_summary: [] } };
+  const remediationPlan = {
+    reconciliation_info: [
+      { ecosystem: 'npm', reconciliation_notes: 'Manifest: package.json\nExit code: 0\naxios 1.0.0 → 2.0.0' },
+    ],
+    summary: { context: {
+      total_vulnerabilities: 61, total_code_scanning_alerts: 3,
+      total_reviewed_prs: 9, total_ignored_prs: 8, total_remediation_prs: 1,
+    }, ecosystem_summary: [] },
+  };
 
   const created = [];
   const updated = [];
@@ -72,14 +77,18 @@ test('tracking issues group by ecosystem and major package or minor-patch, acros
   assert.doesNotMatch(minor.body, /Open security alerts|Open code scanning alerts/);
   assert.match(minor.body, /`postcss`/);
   assert.match(minor.body, /`nanoid`/);
-  assert.doesNotMatch(minor.body, /axios|vite|cryptography/);
+  assert.doesNotMatch(minor.body, /### `(?:axios|vite|cryptography)`/);
   assert.match(minor.body, /\[#10\]\(https:\/\/example\.test\/10\)/);
+  assert.match(minor.body, /## Reconciliation Notes\n\n    Manifest: package\.json/);
+  assert.ok(minor.body.indexOf('## Reconciliation Notes') >
+    minor.body.indexOf('## Remediation Pull Requests'));
 
   const pipIssue = created.find(i => i.title.includes('[pip]'));
   assert.ok(pipIssue.body.includes('Transitive dependency **starlette 0.50.0** is introduced via'));
   assert.ok(pipIssue.body.includes('- fastapi 0.125.0 → starlette 0.50.0'));
   assert.ok(pipIssue.body.includes('- fastapi-sqlalchemy 0.2.1 → starlette 0.50.0'));
   assert.match(pipIssue.body, /\[#20\]\(https:\/\/example\.test\/20\)/);
+  assert.doesNotMatch(pipIssue.body, /## Reconciliation Notes/);
 
   assert.deepEqual(output.summary, remediationPlan.summary);
   assert.equal(output.stats.total_reviewed_prs, 9);

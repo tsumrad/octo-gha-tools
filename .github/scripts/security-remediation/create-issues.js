@@ -315,6 +315,19 @@ function buildRemediationPRsSection(ecosystem, categoryMap, groupPlansSet, group
   return section;
 }
 
+function buildReconciliationNotesSection(ecosystem) {
+  const notes = (remediationPlan.reconciliation_info || [])
+    .filter(info => (info.ecosystem || '').toLowerCase() === ecosystem.toLowerCase())
+    .map(info => (info.reconciliation_notes || '').trim())
+    .filter(Boolean);
+  if (notes.length === 0) return '';
+
+  const indentedNotes = notes.join('\n\n').split('\n')
+    .map(line => `    ${line}`)
+    .join('\n');
+  return `## Reconciliation Notes\n\n${indentedNotes}\n\n`;
+}
+
 // ── Per-package detail sections ──────────────────────────────────────────────
 
 function planStatus(plan) {
@@ -462,6 +475,7 @@ function buildIssueBody(ecosystem, upgradeGroup, group, categoryMap, groupPRs) {
 
   const groupPlansSet = new Set(group.plans);
   body += buildRemediationPRsSection(ecosystem, categoryMap, groupPlansSet, groupPRs);
+  body += buildReconciliationNotesSection(ecosystem);
   body += buildCategoryDetailSections(ecosystem, categoryMap, groupPlansSet, groupPRs, group.plans);
   body += mergeOrderSection();
   body += footerSection();

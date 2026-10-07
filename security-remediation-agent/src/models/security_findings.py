@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
-from src.tools.model.codescanning_alert import CodescanningAlert
-from src.tools.model.vulnerability_alert import VulnerabilityAlert
+from .gh.codescanning_alert import CodescanningAlert
+from .gh.vulnerability_alert import VulnerabilityAlert
 
 @dataclass
 class SecurityFindings:
