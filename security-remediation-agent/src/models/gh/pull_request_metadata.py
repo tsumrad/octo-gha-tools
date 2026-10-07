@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 import logging
 from typing import Any
 
-from src.tools.utils.version_bump_resolver import VersionBump, get_version_bumps
+from ...tools.utils.version_bump_resolver import VersionBump, get_version_bumps
 
 @dataclass
 class PullRequestMetadata:

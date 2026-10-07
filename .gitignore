@@ -27,3 +27,5 @@ __pycache__/
 # Temporary files
 *.tmp
 *.temp
+/security-remediation-agent/sandox
+/security-remediation-agent/build

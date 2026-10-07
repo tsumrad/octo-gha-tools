@@ -50,6 +50,7 @@ class ParentResolution:
     parent: str
     child: str
     resolved_version: str | None = None
+    minimum_upgradable_version: str | None = None
     installed_child_version: str | None = None
     candidates_considered: list[str] = field(default_factory=list)
 
@@ -303,15 +304,38 @@ class PipParentVersionResolver:
             candidates_considered=[c.version for c in candidates],
         )
 
-        # Verify newest-first; the first verified candidate is our answer since
-        # shortlist() already returns versions in descending order.
+        try:
+            current_major = (
+                Version(current_parent_version).major
+                if current_parent_version
+                else None
+            )
+        except InvalidVersion:
+            current_major = None
+
+        non_breaking_candidates = []
+        breaking_candidates = []
         for candidate in candidates:
+            try:
+                is_non_breaking = (
+                    current_major is not None
+                    and Version(candidate.version).major == current_major
+                )
+            except InvalidVersion:
+                is_non_breaking = False
+            target = non_breaking_candidates if is_non_breaking else breaking_candidates
+            target.append(candidate)
+
+        # Verify highest same-major candidates before trying a breaking upgrade.
+        for candidate in [*non_breaking_candidates, *breaking_candidates]:
             installed_child_version = self.verifier.verify(
                 parent, candidate.version, child, safe_child_version
             )
             if installed_child_version is not None:
                 resolution.resolved_version = candidate.version
                 resolution.installed_child_version = installed_child_version
+                if candidate in non_breaking_candidates:
+                    resolution.minimum_upgradable_version = candidate.version
                 break
 
         return resolution
