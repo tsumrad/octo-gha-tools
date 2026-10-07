@@ -52,7 +52,7 @@ test('adapts ecosystem packages, chooses highest severity and routes actions', (
 test('uses the lower version as the minimum and omits the note when both versions match', () => {
   const raw = { remediation_plan_bundles: [{ groupName: 'versions', ecosystem: 'npm', packages: [
     { remediation_package: '@vue/cli-plugin-typescript', current_version: '4.5.19',
-      remediation_version: '5.0.9', upgrade_to_version: '5.1.0',
+      remediation_version: '5.0.9', upgrade_to_version: '5.1.0', minimum_upgradable_version: '5.0.9',
       packages: [{ vulnerabilities: [{ severity: 'high' }] }] },
     { remediation_package: 'same-version', current_version: '1.0.0',
       remediation_version: '2.0.0', upgrade_to_version: '2.0.0',
@@ -64,6 +64,7 @@ test('uses the lower version as the minimum and omits the note when both version
   const plans = prepareOutput(raw).groups.high.plans;
   assert.match(plans[0].action.placeholder_markdown,
     /to `5\.1\.0` \[minimum version: 5\.0\.9\]/);
+  assert.equal(plans[0].package.minimum_upgradable_version, '5.0.9');
   assert.match(plans[1].action.placeholder_markdown, /to `2\.0\.0` \(direct,/);
   assert.doesNotMatch(plans[1].action.placeholder_markdown, /\[minimum version:/);
   assert.match(plans[2].action.placeholder_markdown, /to `3\.0\.0` \(direct,/);

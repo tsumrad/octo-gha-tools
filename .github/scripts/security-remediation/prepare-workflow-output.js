@@ -63,13 +63,13 @@ function prepareOutput(raw, severities = 'critical,high,medium,low') {
       const ecosystem = pkg.ecosystem || bundleEcosystem;
       const remediationVersion = pkg.remediation_version || '';
       const upgradeToVersion = pkg.upgrade_to_version || '';
+      const minimumUpgradableVersion = pkg.minimum_upgradable_version || '';
       const versions = [remediationVersion, upgradeToVersion].filter(Boolean);
       versions.sort(compareVersions);
-      const minimumVersion = versions[0] || '';
       const target = versions.at(-1) || '';
-      const hasDistinctMinimum = remediationVersion
-        && upgradeToVersion
-        && compareVersions(remediationVersion, upgradeToVersion) !== 0;
+      const minimumVersion = minimumUpgradableVersion || versions[0] || '';
+      const hasDistinctMinimum = minimumVersion && target
+        && compareVersions(minimumVersion, target) !== 0;
       const isbreakable = isBreakablePackage(pkg);
       const relationship = isTransitivePackage(pkg) ? 'transitive' : 'direct';
       // Only reuse a PR whose package and target match the planned upgrade.
@@ -95,6 +95,7 @@ function prepareOutput(raw, severities = 'critical,high,medium,low') {
           relationship,
           current_version: pkg.current_version,
           current_version_range: pkg.current_version || 'unknown',
+          minimum_upgradable_version: minimumVersion,
           vulnerabilities,
           pull_requests: pkg.remediation_prs || [],
           dependency_occurrences: dependencyOccurrences,

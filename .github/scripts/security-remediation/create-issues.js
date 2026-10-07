@@ -266,7 +266,11 @@ function buildAcceptanceCriteriaSection(plans) {
   for (const plan of vulnerablePlans) {
     const currentVersion = plan.package.current_version || 'unknown';
     const remediationVersion = plan.fix.upgrade_version || '—';
-    section += `- [ ] Upgrade \`${plan.package.name}\` from \`${currentVersion}\` to \`${remediationVersion}\`\n`;
+    const minimumVersion = plan.package.minimum_upgradable_version;
+    const minimumVersionNote = minimumVersion && minimumVersion !== remediationVersion
+      ? ` [minimum version: ${minimumVersion}]`
+      : '';
+    section += `- [ ] Upgrade \`${plan.package.name}\` from \`${currentVersion}\` to \`${remediationVersion}\`${minimumVersionNote}\n`;
   }
   return section + '\n';
 }
